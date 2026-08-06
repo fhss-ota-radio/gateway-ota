@@ -46,7 +46,7 @@ void OtaManager::loadSettings()
 
     const QString port = settings.value(QStringLiteral("transport/port"), QStringLiteral("/dev/cc1101")).toString();
     const int driverIndex = settings.value(QStringLiteral("transport/driverIndex"), 0).toInt();
-    const int chunkSize = settings.value(QStringLiteral("file/chunkSize"), 56).toInt();
+    const int chunkSize = settings.value(QStringLiteral("file/chunkSize"), 55).toInt(); // ota-protocol OTA_MAX_PAYLOAD_SIZE
     const bool broadcast = settings.value(QStringLiteral("target/broadcast"), false).toBool();
 
     ui->portEdit->setText(port);

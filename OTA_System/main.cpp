@@ -1,4 +1,4 @@
-#include "otamanager.h"
+#include "ui/otamanager.h"
 
 #include <QApplication>
 

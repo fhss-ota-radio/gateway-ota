@@ -173,9 +173,9 @@
          </item>
          <item row="1" column="1">
           <widget class="QSpinBox" name="chunkSizeSpin">
-           <property name="minimum"><number>8</number></property>
-           <property name="maximum"><number>256</number></property>
-           <property name="value"><number>56</number></property>
+           <property name="minimum"><number>1</number></property>
+           <property name="maximum"><number>55</number></property>
+           <property name="value"><number>55</number></property>
           </widget>
          </item>
          <item row="0" column="2">
