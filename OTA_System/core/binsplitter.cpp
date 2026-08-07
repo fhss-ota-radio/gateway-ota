@@ -1,46 +1,49 @@
 #include "binsplitter.h"
 
-#include <QFile>
-
 #include <cstring>
+#include <fstream>
 
-QVector<OtaChunk> BinSplitter::split(const QString &filePath, int chunkSize, QString *errorMessage)
+std::vector<OtaChunk> BinSplitter::split(const std::string &filePath, int chunkSize, std::string *errorMessage)
 {
-    QVector<OtaChunk> chunks;
+    std::vector<OtaChunk> chunks;
 
     if (chunkSize <= 0 || chunkSize > static_cast<int>(OTA_MAX_PAYLOAD_SIZE)) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("청크 크기는 1~%1byte여야 합니다 (ota-protocol 최대 payload)")
-                                .arg(OTA_MAX_PAYLOAD_SIZE);
+            *errorMessage = "청크 크기는 1~" + std::to_string(OTA_MAX_PAYLOAD_SIZE)
+                             + "byte여야 합니다 (ota-protocol 최대 payload)";
         }
         return chunks;
     }
 
-    QFile file(filePath);
-    if (!file.open(QIODevice::ReadOnly)) {
+    // std::ios::ate로 열어서 파일 크기를 바로 알아냄 (QFileInfo::size() 대신)
+    std::ifstream file(filePath, std::ios::binary | std::ios::ate);
+    if (!file.is_open()) {
         if (errorMessage)
-            *errorMessage = QStringLiteral("파일을 열 수 없습니다: %1").arg(filePath);
+            *errorMessage = "파일을 열 수 없습니다: " + filePath;
         return chunks;
     }
 
-    const qint64 fileSize = file.size();
+    const std::streamsize fileSize = file.tellg();
     if (fileSize <= 0) {
         if (errorMessage)
-            *errorMessage = QStringLiteral("파일이 비어 있습니다: %1").arg(filePath);
+            *errorMessage = "파일이 비어 있습니다: " + filePath;
         return chunks;
     }
+    file.seekg(0, std::ios::beg);
 
     // 올림 나눗셈: 마지막 청크가 chunkSize보다 작아도 청크 1개로 셈
     const int totalChunks = static_cast<int>((fileSize + chunkSize - 1) / chunkSize);
-    chunks.reserve(totalChunks);
+    chunks.reserve(static_cast<size_t>(totalChunks));
+
+    std::vector<char> raw(static_cast<size_t>(chunkSize));
 
     for (int seq = 0; seq < totalChunks; ++seq) {
-        const QByteArray raw = file.read(chunkSize);
-        const int actualLength = raw.size();
+        file.read(raw.data(), chunkSize);
+        const std::streamsize actualLength = file.gcount();
 
         if (actualLength <= 0) {
             if (errorMessage)
-                *errorMessage = QStringLiteral("청크 %1 읽기 실패").arg(seq);
+                *errorMessage = "청크 " + std::to_string(seq) + " 읽기 실패";
             chunks.clear();
             return chunks;
         }
@@ -52,20 +55,20 @@ QVector<OtaChunk> BinSplitter::split(const QString &filePath, int chunkSize, QSt
         const size_t written = ota_protocol_encode_data(
             packetBuffer, sizeof(packetBuffer),
             static_cast<uint16_t>(seq), static_cast<uint16_t>(totalChunks),
-            reinterpret_cast<const uint8_t *>(raw.constData()),
+            reinterpret_cast<const uint8_t *>(raw.data()),
             static_cast<size_t>(actualLength));
 
         if (written == 0) {
             if (errorMessage)
-                *errorMessage = QStringLiteral("청크 %1 인코딩 실패 (ota_protocol_encode_data)").arg(seq);
+                *errorMessage = "청크 " + std::to_string(seq) + " 인코딩 실패 (ota_protocol_encode_data)";
             chunks.clear();
             return chunks;
         }
 
         OtaChunk chunk;
         std::memcpy(&chunk.header, packetBuffer, OTA_PACKET_HEADER_SIZE);
-        chunk.packet = QByteArray(reinterpret_cast<const char *>(packetBuffer), static_cast<int>(written));
-        chunks.append(chunk);
+        chunk.packet.assign(packetBuffer, packetBuffer + written);
+        chunks.push_back(std::move(chunk));
     }
 
     return chunks;

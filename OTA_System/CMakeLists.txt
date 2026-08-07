@@ -1,7 +1,9 @@
 cmake_minimum_required(VERSION 3.19)
 project(OTA_System LANGUAGES CXX)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Test)
+# Qt::Test는 더 이상 안 씀 — ota_core_tests가 Qt 의존성 없는 순수 C++ 테스트로 바뀌었음
+# (core/·transport/에서 Qt 타입을 제거한 결정, docs/note/design-notes-gateway-ota-es.md 참고)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets)
 
 qt_standard_project_setup()
 
@@ -30,9 +32,15 @@ if(NOT EXISTS ${OTA_PROTOCOL_INCLUDE_DIR}/ota_protocol.h)
 endif()
 message(STATUS "ota-protocol include: ${OTA_PROTOCOL_INCLUDE_DIR}")
 
-# ---------- ota_core: 화면(QWidget/QMainWindow)과 무관한 순수 로직 ----------
+# ---------- ota_core: 화면(QWidget/QMainWindow) + Qt 전체와 무관한 순수 로직 ----------
 # core/      BIN 분할 (ota-protocol의 공유 헤더로 패킷 직렬화)
 # transport/ ITransport 추상화 + CC1101 구현체(사용자 공간 래퍼)
+#
+# core/·transport/ 전부 std::string/std::vector 등 표준 C++만 쓰고 Qt 타입을
+# 의도적으로 안 씁니다 — 그래서 ota_core는 Qt를 전혀 링크하지 않습니다.
+# (ota-protocol처럼 g++/clang++만으로도 빌드·테스트 가능하게 하려는 목적,
+# docs/note/design-notes-gateway-ota-es.md 참고)
+#
 # GUI 앱과 유닛테스트 양쪽에서 이 라이브러리를 그대로 링크해서 재사용한다.
 add_library(ota_core STATIC
     core/binsplitter.h
@@ -42,7 +50,7 @@ add_library(ota_core STATIC
     transport/cc1101transport.h
     transport/cc1101transport.cpp
 )
-target_link_libraries(ota_core PUBLIC Qt::Core)
+target_compile_features(ota_core PUBLIC cxx_std_17)
 target_include_directories(ota_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/core
@@ -79,16 +87,16 @@ qt_generate_deploy_app_script(
 )
 install(SCRIPT ${deploy_script})
 
-# ---------- ota_core_tests: 화면 없이 core/transport 로직만 독립 실행/검증 ----------
+# ---------- ota_core_tests: Qt 없이 core/transport 로직만 독립 실행/검증 ----------
+# ota_core가 Qt를 링크 안 하므로 이 테스트도 qt_add_executable이 아닌 일반
+# add_executable로 충분함 (Qt::Test도 필요 없음).
 enable_testing()
 
-qt_add_executable(ota_core_tests
+add_executable(ota_core_tests
     tests/tst_binsplitter.cpp
 )
 target_link_libraries(ota_core_tests
     PRIVATE
-        Qt::Core
-        Qt::Test
         ota_core
 )
 add_test(NAME ota_core_tests COMMAND ota_core_tests)

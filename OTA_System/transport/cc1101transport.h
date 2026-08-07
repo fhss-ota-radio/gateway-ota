@@ -4,7 +4,7 @@
 #include "cc1101_status.h"
 #include "itransport.h"
 
-#include <QString>
+#include <string>
 
 // ITransport의 CC1101 구현체.
 //
@@ -14,24 +14,28 @@
 //   채널 변경 -> ioctl() / RX 시작 -> ioctl() / 송신 -> write()
 //   수신 -> poll() + read() / FIFO 초기화 -> ioctl()
 //
+// [의도적으로 Qt 의존성 없음] QString/QByteArray 대신 std::string/std::vector<uint8_t>
+// 사용. 여기서 하는 일이 POSIX 시스템콜(open/write/poll/read/ioctl) 호출뿐이라
+// Qt가 전혀 필요 없음 — Qt는 화면(ui/) 쪽에서만 필요합니다.
+//
 // TODO(부품 입고 후): 지금은 하드웨어·드라이버가 없어 open()이 항상 실패하는 스텁 상태.
 // CC1101 커널 드라이버가 준비되면 open()/send()/recv()/setChannel() 등을 실제
 // POSIX 시스템콜(::open, ::write, ::poll, ::read, ::ioctl)로 채운다.
 class Cc1101Transport : public ITransport
 {
 public:
-    explicit Cc1101Transport(const QString &devicePath = QStringLiteral("/dev/cc1101"));
+    explicit Cc1101Transport(const std::string &devicePath = "/dev/cc1101");
     ~Cc1101Transport() override;
 
     bool open() override;
     void close() override;
     bool isOpen() const override;
 
-    bool send(const QByteArray &data) override;
-    QByteArray recv() override;
+    bool send(const std::vector<uint8_t> &data) override;
+    std::vector<uint8_t> recv() override;
 
     // cc1101-radio-api.md 5절 공통 API 대응 (라디오 API 담당 영역 — 팀원 4·5 드라이버가 실제 처리)
-    Cc1101Status setChannel(quint8 channel);
+    Cc1101Status setChannel(uint8_t channel);
     Cc1101Status startRx();
     Cc1101Status flushRx();
     Cc1101Status flushTx();
@@ -42,7 +46,7 @@ public:
     Cc1101Status lastStatus() const { return m_lastStatus; }
 
 private:
-    QString m_devicePath;
+    std::string m_devicePath;
     int m_fd = -1;
     Cc1101Status m_lastStatus = Cc1101Status::NotInitialized;
     Cc1101RxMetadata m_lastRxMetadata;

@@ -8,7 +8,7 @@
 // 지금은 하드웨어와 커널 드라이버가 없으므로, 항상 실패/빈 값을 돌려주는 스텁으로 둔다.
 // (그래야 화면 쪽 "CC1101" 드라이버 옵션을 골라도 앱이 죽지 않고 실패 로그만 남음)
 
-Cc1101Transport::Cc1101Transport(const QString &devicePath)
+Cc1101Transport::Cc1101Transport(const std::string &devicePath)
     : m_devicePath(devicePath)
 {
 }
@@ -20,7 +20,7 @@ Cc1101Transport::~Cc1101Transport()
 
 bool Cc1101Transport::open()
 {
-    // TODO: m_fd = ::open(m_devicePath.toLocal8Bit().constData(), O_RDWR);
+    // TODO: m_fd = ::open(m_devicePath.c_str(), O_RDWR);
     m_lastStatus = Cc1101Status::NotInitialized;
     return false;
 }
@@ -36,24 +36,24 @@ bool Cc1101Transport::isOpen() const
     return m_fd >= 0;
 }
 
-bool Cc1101Transport::send(const QByteArray &data)
+bool Cc1101Transport::send(const std::vector<uint8_t> &data)
 {
-    Q_UNUSED(data);
-    // TODO: ::write(m_fd, data.constData(), data.size())
+    (void)data;
+    // TODO: ::write(m_fd, data.data(), data.size())
     m_lastStatus = Cc1101Status::NotInitialized;
     return false;
 }
 
-QByteArray Cc1101Transport::recv()
+std::vector<uint8_t> Cc1101Transport::recv()
 {
     // TODO: ::poll()로 읽기 가능 여부 확인 후 ::read(m_fd, ...) + m_lastRxMetadata 채우기
     m_lastStatus = Cc1101Status::NotInitialized;
-    return QByteArray();
+    return {};
 }
 
-Cc1101Status Cc1101Transport::setChannel(quint8 channel)
+Cc1101Status Cc1101Transport::setChannel(uint8_t channel)
 {
-    Q_UNUSED(channel);
+    (void)channel;
     // TODO: ::ioctl(m_fd, CC1101_IOC_SET_CHANNEL, &channel)
     return Cc1101Status::NotInitialized;
 }
