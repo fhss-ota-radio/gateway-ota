@@ -1,0 +1,287 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>OtaManager</class>
+ <widget class="QMainWindow" name="OtaManager">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>760</width>
+    <height>780</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>OTA Manager</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QVBoxLayout" name="rootLayout">
+    <property name="leftMargin"><number>16</number></property>
+    <property name="topMargin"><number>16</number></property>
+    <property name="rightMargin"><number>16</number></property>
+    <property name="bottomMargin"><number>16</number></property>
+    <property name="spacing"><number>12</number></property>
+    <item>
+     <widget class="QGroupBox" name="connectionGroup">
+      <property name="title"><string>연결 (Transport)</string></property>
+      <layout class="QVBoxLayout" name="connectionOuterLayout">
+       <item>
+        <layout class="QFormLayout" name="connectionFormLayout">
+         <item row="0" column="0">
+          <widget class="QLabel" name="driverLabel">
+           <property name="text"><string>드라이버 선택</string></property>
+          </widget>
+         </item>
+         <item row="0" column="1">
+          <widget class="QComboBox" name="driverCombo">
+           <item><property name="text"><string>로컬 파일 (테스트용)</string></property></item>
+           <item><property name="text"><string>CC1101 (/dev/cc1101)</string></property></item>
+          </widget>
+         </item>
+         <item row="1" column="0">
+          <widget class="QLabel" name="portLabel">
+           <property name="text"><string>디바이스 경로 / 포트</string></property>
+          </widget>
+         </item>
+         <item row="1" column="1">
+          <widget class="QLineEdit" name="portEdit">
+           <property name="placeholderText"><string>/dev/cc1101</string></property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="connectButtonLayout">
+         <item>
+          <widget class="QPushButton" name="connectButton">
+           <property name="text"><string>연결</string></property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="connectButtonSpacer">
+           <property name="orientation"><enum>Qt::Horizontal</enum></property>
+           <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+          </spacer>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="statusLayout">
+         <item>
+          <widget class="QLabel" name="connectionStatusDot">
+           <property name="minimumSize"><size><width>10</width><height>10</height></size></property>
+           <property name="maximumSize"><size><width>10</width><height>10</height></size></property>
+           <property name="styleSheet"><string notr="true">background-color:#c0392b; border-radius:5px;</string></property>
+           <property name="text"><string/></property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QLabel" name="connectionStatusLabel">
+           <property name="text"><string>연결 안 됨</string></property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="statusSpacer">
+           <property name="orientation"><enum>Qt::Horizontal</enum></property>
+           <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+          </spacer>
+         </item>
+        </layout>
+       </item>
+      </layout>
+     </widget>
+    </item>
+    <item>
+     <widget class="QGroupBox" name="targetGroup">
+      <property name="title"><string>전송 대상</string></property>
+      <layout class="QVBoxLayout" name="targetOuterLayout">
+       <item>
+        <layout class="QHBoxLayout" name="modeLayout">
+         <item>
+          <widget class="QRadioButton" name="unicastRadio">
+           <property name="text"><string>유니캐스트</string></property>
+           <property name="checked"><bool>true</bool></property>
+           <attribute name="buttonGroup"><string notr="true">modeButtonGroup</string></attribute>
+          </widget>
+         </item>
+         <item>
+          <widget class="QRadioButton" name="broadcastRadio">
+           <property name="text"><string>브로드캐스트</string></property>
+           <attribute name="buttonGroup"><string notr="true">modeButtonGroup</string></attribute>
+          </widget>
+         </item>
+         <item>
+          <spacer name="modeSpacer">
+           <property name="orientation"><enum>Qt::Horizontal</enum></property>
+           <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+          </spacer>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <layout class="QFormLayout" name="targetFormLayout">
+         <item row="0" column="0">
+          <widget class="QLabel" name="targetLabel">
+           <property name="text"><string>대상 ESP32 (무전기 노드)</string></property>
+          </widget>
+         </item>
+         <item row="0" column="1">
+          <widget class="QComboBox" name="targetCombo">
+           <item><property name="text"><string>Node 01</string></property></item>
+           <item><property name="text"><string>Node 02</string></property></item>
+           <item><property name="text"><string>Node 03</string></property></item>
+          </widget>
+         </item>
+        </layout>
+       </item>
+      </layout>
+     </widget>
+    </item>
+    <item>
+     <widget class="QGroupBox" name="fileGroup">
+      <property name="title"><string>펌웨어 BIN 파일</string></property>
+      <layout class="QVBoxLayout" name="fileOuterLayout">
+       <item>
+        <layout class="QHBoxLayout" name="fileRowLayout">
+         <item>
+          <widget class="QPushButton" name="selectFileButton">
+           <property name="text"><string>파일 선택</string></property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QLabel" name="filePathLabel">
+           <property name="text"><string>선택된 파일 없음</string></property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <layout class="QGridLayout" name="fileInfoGridLayout">
+         <item row="0" column="0">
+          <widget class="QLabel" name="fileSizeTitleLabel">
+           <property name="text"><string>파일 크기</string></property>
+          </widget>
+         </item>
+         <item row="1" column="0">
+          <widget class="QLabel" name="fileSizeValueLabel">
+           <property name="text"><string>-</string></property>
+          </widget>
+         </item>
+         <item row="0" column="1">
+          <widget class="QLabel" name="chunkSizeTitleLabel">
+           <property name="text"><string>청크 크기 (byte)</string></property>
+          </widget>
+         </item>
+         <item row="1" column="1">
+          <widget class="QSpinBox" name="chunkSizeSpin">
+           <property name="minimum"><number>1</number></property>
+           <property name="maximum"><number>55</number></property>
+           <property name="value"><number>55</number></property>
+          </widget>
+         </item>
+         <item row="0" column="2">
+          <widget class="QLabel" name="totalChunksTitleLabel">
+           <property name="text"><string>총 청크 수</string></property>
+          </widget>
+         </item>
+         <item row="1" column="2">
+          <widget class="QLabel" name="totalChunksValueLabel">
+           <property name="text"><string>-</string></property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+      </layout>
+     </widget>
+    </item>
+    <item>
+     <widget class="QGroupBox" name="progressGroup">
+      <property name="title"><string>전송 진행률</string></property>
+      <layout class="QVBoxLayout" name="progressOuterLayout">
+       <item>
+        <widget class="QProgressBar" name="progressBar">
+         <property name="value"><number>0</number></property>
+        </widget>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="progressInfoLayout">
+         <item>
+          <widget class="QLabel" name="progressStatusLabel">
+           <property name="text"><string>대기 중</string></property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="progressInfoSpacer">
+           <property name="orientation"><enum>Qt::Horizontal</enum></property>
+           <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+          </spacer>
+         </item>
+         <item>
+          <widget class="QLabel" name="ackStatusLabel">
+           <property name="text"><string>ACK 0 / 0 · 재전송 0회</string></property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="progressButtonLayout">
+         <item>
+          <spacer name="progressButtonSpacer">
+           <property name="orientation"><enum>Qt::Horizontal</enum></property>
+           <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+          </spacer>
+         </item>
+         <item>
+          <widget class="QPushButton" name="startButton">
+           <property name="text"><string>전송 시작</string></property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="pauseButton">
+           <property name="enabled"><bool>false</bool></property>
+           <property name="text"><string>일시정지</string></property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+      </layout>
+     </widget>
+    </item>
+    <item>
+     <widget class="QGroupBox" name="logGroup">
+      <property name="title"><string>로그</string></property>
+      <layout class="QVBoxLayout" name="logOuterLayout">
+       <item>
+        <widget class="QPlainTextEdit" name="logView">
+         <property name="font">
+          <font>
+           <family>Courier New</family>
+           <pointsize>10</pointsize>
+          </font>
+         </property>
+         <property name="readOnly"><bool>true</bool></property>
+         <property name="maximumBlockCount"><number>2000</number></property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QMenuBar" name="menubar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>760</width>
+     <height>33</height>
+    </rect>
+   </property>
+  </widget>
+  <widget class="QStatusBar" name="statusbar"/>
+ </widget>
+ <resources/>
+ <connections/>
+ <buttongroups>
+  <buttongroup name="modeButtonGroup"/>
+ </buttongroups>
+</ui>
