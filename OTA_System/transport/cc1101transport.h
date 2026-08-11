@@ -4,6 +4,7 @@
 #include "cc1101_status.h"
 #include "itransport.h"
 
+#include <cstdint>
 #include <string>
 
 // ITransport의 CC1101 구현체.
@@ -18,9 +19,11 @@
 // 사용. 여기서 하는 일이 POSIX 시스템콜(open/write/poll/read/ioctl) 호출뿐이라
 // Qt가 전혀 필요 없음 — Qt는 화면(ui/) 쪽에서만 필요합니다.
 //
-// TODO(부품 입고 후): 지금은 하드웨어·드라이버가 없어 open()이 항상 실패하는 스텁 상태.
-// CC1101 커널 드라이버가 준비되면 open()/send()/recv()/setChannel() 등을 실제
-// POSIX 시스템콜(::open, ::write, ::poll, ::read, ::ioctl)로 채운다.
+// [실구현 완료, 2026-08-11] 팀원분(`feature/ota-tx` 브랜치)이 실제 POSIX 구현을
+// 채운 걸 이 브랜치(`ota-core-skeleton`)로 가져왔습니다. open()은 O_NONBLOCK으로
+// /dev/cc1101을 열고, send()는 write(), recv()는 poll()+read()+ioctl(GET_STATUS)로
+// RSSI/LQI/CRC까지 채웁니다. 자세한 내용은 cc1101transport.cpp 주석 및
+// docs/note/design-notes-gateway-ota-es.md 참고.
 class Cc1101Transport : public ITransport
 {
 public:
@@ -46,8 +49,12 @@ public:
     Cc1101Status lastStatus() const { return m_lastStatus; }
 
 private:
+    // errno(시스템 콜 실패 원인 번호)를 Cc1101Status로 변환 (예: EAGAIN -> NoData)
+    Cc1101Status statusFromErrno(int err) const;
+
     std::string m_devicePath;
     int m_fd = -1;
+    uint8_t m_channel = 0;
     Cc1101Status m_lastStatus = Cc1101Status::NotInitialized;
     Cc1101RxMetadata m_lastRxMetadata;
 };

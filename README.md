@@ -8,6 +8,13 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
 - ACK/NACK 기반 재전송 큐
 - 유니캐스트(특정 단말) / 브로드캐스트(1:N) 전송 모드
 
+> OTA 송신 쪽 상태기계(연결→파일 선택→핸드셰이크→배치 전송→완료/실패) 설계는
+> `docs/fsm-design.md` 참고. `firmware-esp32`의 수신 측 `fsm-design.md`와 짝을 이룸.
+> 아직 미확정 문서입니다 (`ota-protocol` 팀 합의 전).
+>
+> 마일스톤별 완료/진행/대기 상태와 세부 일정(Day 1~5, 기기 테스트 체크리스트)은
+> `docs/roadmap.md` 참고.
+
 ## 담당
 팀원3, 4
 
@@ -49,12 +56,11 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
 > (안 맞으면 CMake 설정 단계에서 안내 메시지와 함께 에러).
 > 빌드: `cmake --build . --target ota_core_tests && ctest -R ota_core_tests` (GUI 앱 `OTA_System`은 안 띄우고 로직만 검증 가능)
 
-### 마일스톤 2 — 전송 계층 추상화 (착수)
+### 마일스톤 2 — 전송 계층 추상화 (완료)
 - [x] `ITransport` 인터페이스 — `transport/itransport.h` (open/close/isOpen/send/recv)
 - [x] `Cc1101Status`/`Cc1101RxMetadata` — `transport/cc1101_status.h` (통신 팀원 4·5의 `cc1101-radio-api.md`와 의미 통일)
-- [x] `Cc1101Transport` 스켈레톤 — `transport/cc1101transport.h/.cpp` (지금은 open()이 항상 실패하는 스텁, 부품 입고 후 POSIX `open/write/poll+read/ioctl`로 구현 예정)
+- [x] `Cc1101Transport` 실구현 — `transport/cc1101transport.h/.cpp` (POSIX `open(O_NONBLOCK)/write/poll+read/ioctl`), `transport/cc1101_ioctl.h`(UAPI 계약 헤더) 추가. `#if defined(__linux__)`로 감싸서 리눅스(라즈베리파이)에서만 실구현이 빌드되고, macOS 등 로컬 환경에서는 자동으로 안전한 폴백 스텁이 빌드됨(로컬 빌드 안 깨짐)
 - [x] 폴더 재구성 — `ui/`(화면) · `core/`(분할·CRC·프로토콜) · `transport/`(ITransport·CC1101) · `tests/`
-- [ ] 팀원 4·5 커널 드라이버(`/dev/cc1101`) 완성 후 `Cc1101Transport` 실제 구현
 
 > 자세한 배경(왜 커널 모듈은 C인지, CC1101 라이브러리 담당 범위, 팀 합의 필요 항목 등)은
 > `docs/note/design-notes-gateway-ota-es.md` 참고 (개인 참고용 문서라 `.gitignore`에 있어 이 레포를
