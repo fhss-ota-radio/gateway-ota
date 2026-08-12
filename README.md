@@ -8,12 +8,11 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
 - ACK/NACK 기반 재전송 큐
 - 유니캐스트(특정 단말) / 브로드캐스트(1:N) 전송 모드
 
-> OTA 송신 쪽 상태기계(연결→파일 선택→핸드셰이크→배치 전송→완료/실패) 설계는
-> `docs/fsm-design.md` 참고. `firmware-esp32`의 수신 측 `fsm-design.md`와 짝을 이룸.
-> 아직 미확정 문서입니다 (`ota-protocol` 팀 합의 전).
->
-> 마일스톤별 완료/진행/대기 상태와 세부 일정(Day 1~5, 기기 테스트 체크리스트)은
-> `docs/roadmap.md` 참고.
+> `ota-protocol` 핵심 스펙(패킷 구조/`version` 제거/DISCOVER)은
+> 교차 확인까지 마쳤습니다(2026-08-11). 남은 합의 항목(`DISCOVER_ACK` 백오프 범위,
+> `seq`/`total_chunks` 32bit 최종 확인)은 `ota-protocol` README 참고 — 이
+> 상태기계 구조 자체에 영향을 주는 항목은 아닙니다.
+
 
 ## 담당
 팀원3, 4
@@ -37,15 +36,28 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
 ### 마일스톤 3 — BIN 분할 + CRC 구현 (착수)
 - [x] `ota-protocol` 공유 레포 연동 — `core/otaprotocol.h`(자체 CRC32 버전)를 삭제하고,
       `gateway-ota`와 같은 상위 폴더에 형제 폴더로 clone된 `ota-protocol/include/ota_protocol.h`를 씀.
-      헤더 9byte, 최대 payload 55byte, CRC-16/CCITT-FALSE (자세한 이유는 `docs/note/design-notes-gateway-ota-es.md` 9절)
 - [x] `BinSplitter` 클래스 — `core/binsplitter.h/.cpp`
   - `std::ifstream` 기반 청크 분할, `ota_protocol_encode_data()`로 헤더+payload 직렬화
   - 패딩 없음 — `payload_length` 필드가 실제 길이를 전달하므로 마지막 청크는 짧게 그대로 전송
   - **Qt 의존성 전혀 없음** (`std::string`/`std::vector` 등 표준 C++만 사용) → 화면 없이,
     Qt6/CMake 없이도 `g++`/`clang++`만으로 단독 컴파일·테스트 가능 (`transport/`도 동일)
+  - **2026-08-11: `ota-protocol` v0.2 API로 갱신** — 헤더 12byte, 최대 payload
+    48byte, CRC-16/CCITT-FALSE는 그대로지만 `session_id`(세션마다 랜덤,
+    `OtaSession`이 만들어서 넘겨줌)가 새로 필요해져서 `split()` 시그니처에
+    `sessionId` 파라미터 추가(`split(filePath, sessionId, chunkSize, errorMessage)`,
+    기본값 없이 항상 명시). `OtaChunk::header` 타입도 `ota_packet_header_t`→
+    `ota_data_header_fields_t`로 바뀌었고, `total_chunks`는 더 이상 DATA 헤더에
+    없음(v0.2부터 `OTA_START`에만 실림 — 총 개수는 `split()` 결과 벡터의
+    크기로 이미 알 수 있음). 헤더 값도 더 이상 와이어 바이트를 그대로
+    `memcpy`하지 않고 이미 아는 값(session_id/sequence/payload_length)과
+    `ota_protocol_crc16()` 결과로 직접 채움 (`ota_protocol.h` 자체의
+    "구조체를 그대로 memcpy하지 않는다" 원칙과 동일). 자세한 이유는
+    `docs/note/design-notes-gateway-ota-es.md` 13절
 - [x] `ota_core` 정적 라이브러리로 분리 (`CMakeLists.txt`) — GUI 앱(`OTA_System`)과 유닛테스트(`ota_core_tests`)가 공통으로 링크. Qt를 전혀 링크하지 않음
 - [x] `ota_core_tests` — `tests/tst_binsplitter.cpp` (assert 기반 순수 C++ 테스트, 창 없이 콘솔에서만 실행)
-  - 정확히 나눠떨어지는 파일 / 짧은 마지막 청크 / CRC 무결성(디코딩 거부) / 에러 케이스
+  - 정확히 나눠떨어지는 파일 / 짧은 마지막 청크 / CRC 무결성(디코딩 거부) / 에러 케이스 /
+    쪼갠 뒤 다시 합쳐서 원본과 바이트 단위로 일치하는지 확인하는 round-trip 테스트,
+    7개 전부 통과(g++ -std=c++17 확인)
   - `g++ -std=c++17 -I. -Icore -I../../ota-protocol/include tests/tst_binsplitter.cpp core/binsplitter.cpp -o tst_binsplitter && ./tst_binsplitter`로 CMake 없이도 바로 실행 가능
 - [ ] BinSplitter 결과를 `otamanager.cpp`(화면)에서 실제로 호출해 진행률·로그에 반영
 - [ ] `LocalFileTransport`(ITransport 임시 구현체, 로컬 파일 write)로 직렬화 결과 저장
@@ -62,6 +74,3 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
 - [x] `Cc1101Transport` 실구현 — `transport/cc1101transport.h/.cpp` (POSIX `open(O_NONBLOCK)/write/poll+read/ioctl`), `transport/cc1101_ioctl.h`(UAPI 계약 헤더) 추가. `#if defined(__linux__)`로 감싸서 리눅스(라즈베리파이)에서만 실구현이 빌드되고, macOS 등 로컬 환경에서는 자동으로 안전한 폴백 스텁이 빌드됨(로컬 빌드 안 깨짐)
 - [x] 폴더 재구성 — `ui/`(화면) · `core/`(분할·CRC·프로토콜) · `transport/`(ITransport·CC1101) · `tests/`
 
-> 자세한 배경(왜 커널 모듈은 C인지, CC1101 라이브러리 담당 범위, 팀 합의 필요 항목 등)은
-> `docs/note/design-notes-gateway-ota-es.md` 참고 (개인 참고용 문서라 `.gitignore`에 있어 이 레포를
-> 새로 clone한 팀원 화면에는 안 보일 수 있습니다).

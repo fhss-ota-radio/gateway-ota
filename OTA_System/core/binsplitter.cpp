@@ -3,7 +3,8 @@
 #include <cstring>
 #include <fstream>
 
-std::vector<OtaChunk> BinSplitter::split(const std::string &filePath, int chunkSize, std::string *errorMessage)
+std::vector<OtaChunk> BinSplitter::split(const std::string &filePath, uint32_t sessionId,
+                                          int chunkSize, std::string *errorMessage)
 {
     std::vector<OtaChunk> chunks;
 
@@ -48,15 +49,17 @@ std::vector<OtaChunk> BinSplitter::split(const std::string &filePath, int chunkS
             return chunks;
         }
 
-        // ota_protocol_encode_data가 헤더(9byte) + payload(actualLength)를 그대로
+        // ota_protocol_encode_data가 헤더(12byte) + payload(actualLength)를 그대로
         // 직렬화해준다. 마지막 청크가 chunkSize보다 짧아도 payload_length 필드에
         // 실제 길이가 남기 때문에 0x00 패딩이 따로 필요 없다.
-        uint8_t packetBuffer[OTA_MAX_PACKET_SIZE];
+        uint8_t packetBuffer[OTA_RF_PACKET_BODY_MAX_SIZE];
+        const auto *payloadBytes = reinterpret_cast<const uint8_t *>(raw.data());
+        const auto payloadLength = static_cast<size_t>(actualLength);
+
         const size_t written = ota_protocol_encode_data(
             packetBuffer, sizeof(packetBuffer),
-            static_cast<uint16_t>(seq), static_cast<uint16_t>(totalChunks),
-            reinterpret_cast<const uint8_t *>(raw.data()),
-            static_cast<size_t>(actualLength));
+            sessionId, static_cast<uint32_t>(seq),
+            payloadBytes, payloadLength);
 
         if (written == 0) {
             if (errorMessage)
@@ -65,8 +68,16 @@ std::vector<OtaChunk> BinSplitter::split(const std::string &filePath, int chunkS
             return chunks;
         }
 
+        // 2026-08-11 v0.2: 헤더 struct가 더 이상 와이어 바이트와 1:1로 겹치지
+        // 않아서(패딩 가능성 있음) memcpy로 통째로 떠오지 않고, 이미 알고 있는
+        // 값들(session_id/sequence/payload_length)과 crc16을 직접 채운다 —
+        // ota_protocol.h 자체가 지향하는 "구조체를 그대로 memcpy하지 않는다"는
+        // 원칙과 같은 이유.
         OtaChunk chunk;
-        std::memcpy(&chunk.header, packetBuffer, OTA_PACKET_HEADER_SIZE);
+        chunk.header.session_id = sessionId;
+        chunk.header.sequence = static_cast<uint32_t>(seq);
+        chunk.header.payload_length = static_cast<uint8_t>(payloadLength);
+        chunk.header.crc16 = ota_protocol_crc16(payloadBytes, payloadLength);
         chunk.packet.assign(packetBuffer, packetBuffer + written);
         chunks.push_back(std::move(chunk));
     }

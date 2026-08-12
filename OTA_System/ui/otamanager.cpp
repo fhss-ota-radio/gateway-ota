@@ -46,7 +46,7 @@ void OtaManager::loadSettings()
 
     const QString port = settings.value(QStringLiteral("transport/port"), QStringLiteral("/dev/cc1101")).toString();
     const int driverIndex = settings.value(QStringLiteral("transport/driverIndex"), 0).toInt();
-    const int chunkSize = settings.value(QStringLiteral("file/chunkSize"), 55).toInt(); // ota-protocol OTA_MAX_PAYLOAD_SIZE
+    const int chunkSize = settings.value(QStringLiteral("file/chunkSize"), 48).toInt(); // ota-protocol OTA_MAX_PAYLOAD_SIZE (v0.2, 2026-08-11 갱신)
     const bool broadcast = settings.value(QStringLiteral("target/broadcast"), false).toBool();
 
     ui->portEdit->setText(port);
