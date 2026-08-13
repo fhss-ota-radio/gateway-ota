@@ -33,10 +33,15 @@ endif()
 message(STATUS "ota-protocol include: ${OTA_PROTOCOL_INCLUDE_DIR}")
 
 # ---------- ota_core: 화면(QWidget/QMainWindow) + Qt 전체와 무관한 순수 로직 ----------
-# core/      BIN 분할 (ota-protocol의 공유 헤더로 패킷 직렬화)
-# transport/ ITransport 추상화 + CC1101 구현체(사용자 공간 래퍼)
+# core/      BIN 분할 (ota-protocol의 공유 헤더로 패킷 직렬화) — 순수 데이터 변환, I/O 없음
+# transport/ ITransport 추상화 + CC1101 구현체(사용자 공간 래퍼) — I/O 담당
+# session/   core/·transport/를 엮어서 실제 "전송 흐름"을 만드는 조율(orchestration) 계층.
+#            지금은 simplesender(ACK 없는 단순 전송)뿐이지만, 다음 단계 OtaSession
+#            (FSM, ACK/재전송)도 이 폴더에 들어갈 예정 — core/에 안 둔 이유는
+#            core/가 "순수 변환 로직" 전용 자리라는 정의를 유지하고 싶어서
+#            (docs/note/design-notes-gateway-ota-es.md 14절 참고)
 #
-# core/·transport/ 전부 std::string/std::vector 등 표준 C++만 쓰고 Qt 타입을
+# core/·transport/·session/ 전부 std::string/std::vector 등 표준 C++만 쓰고 Qt 타입을
 # 의도적으로 안 씁니다 — 그래서 ota_core는 Qt를 전혀 링크하지 않습니다.
 # (ota-protocol처럼 g++/clang++만으로도 빌드·테스트 가능하게 하려는 목적,
 # docs/note/design-notes-gateway-ota-es.md 참고)
@@ -45,6 +50,8 @@ message(STATUS "ota-protocol include: ${OTA_PROTOCOL_INCLUDE_DIR}")
 add_library(ota_core STATIC
     core/binsplitter.h
     core/binsplitter.cpp
+    session/simplesender.h
+    session/simplesender.cpp
     transport/itransport.h
     transport/cc1101_status.h
     transport/cc1101transport.h
@@ -55,6 +62,7 @@ target_include_directories(ota_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/core
     ${CMAKE_CURRENT_SOURCE_DIR}/transport
+    ${CMAKE_CURRENT_SOURCE_DIR}/session
     ${OTA_PROTOCOL_INCLUDE_DIR}
 )
 
@@ -100,3 +108,14 @@ target_link_libraries(ota_core_tests
         ota_core
 )
 add_test(NAME ota_core_tests COMMAND ota_core_tests)
+
+# ---------- ota_smoke_send: 실기기(CC1101) 스모크테스트용 단순 송신 CLI ----------
+# /dev/cc1101이 실제로 있어야 동작하는 수동 실행 도구라서 add_test()에는 등록하지
+# 않음 — ctest(자동 빌드 검증)에는 안 끼고, 실기기 앞에서 사람이 직접 실행.
+add_executable(ota_smoke_send
+    tests/smoke_send_main.cpp
+)
+target_link_libraries(ota_smoke_send
+    PRIVATE
+        ota_core
+)
