@@ -52,6 +52,8 @@ add_library(ota_core STATIC
     core/binsplitter.cpp
     session/simplesender.h
     session/simplesender.cpp
+    session/simplereceiver.h
+    session/simplereceiver.cpp
     transport/itransport.h
     transport/cc1101_status.h
     transport/cc1101transport.h
@@ -109,13 +111,21 @@ target_link_libraries(ota_core_tests
 )
 add_test(NAME ota_core_tests COMMAND ota_core_tests)
 
-# ---------- ota_smoke_send: 실기기(CC1101) 스모크테스트용 단순 송신 CLI ----------
+# ---------- ota_smoke_send / ota_smoke_recv: 실기기(CC1101) 스모크테스트용 CLI ----------
 # /dev/cc1101이 실제로 있어야 동작하는 수동 실행 도구라서 add_test()에는 등록하지
 # 않음 — ctest(자동 빌드 검증)에는 안 끼고, 실기기 앞에서 사람이 직접 실행.
 add_executable(ota_smoke_send
     tests/smoke_send_main.cpp
 )
 target_link_libraries(ota_smoke_send
+    PRIVATE
+        ota_core
+)
+
+add_executable(ota_smoke_recv
+    tests/smoke_recv_main.cpp
+)
+target_link_libraries(ota_smoke_recv
     PRIVATE
         ota_core
 )
