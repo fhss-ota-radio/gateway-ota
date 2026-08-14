@@ -65,4 +65,77 @@ SimpleSendResult simpleSendFile(
     int chunkDelayMs = 10,
     const std::function<void(const SimpleSendProgress &)> &onProgress = nullptr);
 
+// simpleSendFile()의 "OTA_START 이후" 부분만 떼어낸 함수 — DATA 전부 보내고
+// OTA_END까지 보냅니다. OTA_START는 이미 다른 곳(아래 performHandshake())에서
+// 보내고 확인까지 받은 뒤, 같은 세션으로 이어서 DATA/END만 보내고 싶을 때
+// 씁니다. simpleSendFile()도 내부적으로 이 함수를 그대로 재사용합니다
+// (중복 방지) — simpleSendFile()의 동작은 이 리팩터링 전후로 완전히
+// 동일합니다.
+//
+// imageSize/totalChunks: 호출부가 이미 알고 있는 값을 그대로 넘깁니다
+// (OTA_START를 만들 때 이미 계산했을 것이므로 다시 계산하지 않음).
+SimpleSendResult sendDataAndEnd(
+    ITransport &transport,
+    const std::string &filePath,
+    uint32_t sessionId,
+    uint32_t imageSize,
+    uint32_t totalChunks,
+    int chunkSize = -1,
+    int chunkDelayMs = 10,
+    const std::function<void(const SimpleSendProgress &)> &onProgress = nullptr);
+
+// sessionId==0("자동 생성" 신호)일 때 실제로 쓸 랜덤 session_id를 만듦.
+// simpleSendFile()과 performHandshake()가 공통으로 쓰는 작은 유틸이라 여기
+// 하나로 모아둠(중복 방지).
+uint32_t generateSessionId();
+
+// 파일 크기만 필요할 때 쓰는 헬퍼. 실패 시 false 반환 + errorMessage 채움.
+bool readFileSize(const std::string &filePath, uint32_t *sizeOut, std::string *errorMessage);
+
+// ============================================================================
+// 핸드셰이크 — docs/fsm-design.md의 HANDSHAKING 상태 구현
+//
+// 위 simpleSendFile()/sendDataAndEnd()와 파일을 같이 쓰는 이유: 별도
+// session/handshake.h로 분리했다가 "파일이 계속 늘어나는 게 싫다"는
+// 피드백을 받고 다시 합쳤습니다. simpleSendFile()(ACK 대기 없음)과
+// performHandshake()(ACK 대기함)는 서로 하는 일이 반대라 헷갈릴 수 있어서,
+// 아래처럼 이 파일 안에서도 구역을 분명히 나눠뒀습니다 — 파일 하나에
+// 있다고 두 함수의 "계약"(단순 전송 vs 핸드셰이크)이 섞이는 건 아닙니다.
+// ============================================================================
+
+struct HandshakeResult
+{
+    bool success = false;
+    std::string errorMessage;
+    uint32_t sessionId = 0;     // 실제로 사용된 session_id (0을 넘겼다면 내부 생성값)
+    uint32_t imageSize = 0;     // 이어서 sendDataAndEnd()에 그대로 넘기면 됨
+    uint32_t totalChunks = 0;   // 위와 동일
+};
+
+// OTA_START를 보내고, 그 응답(OTA_ACK)이 올 때까지 기다립니다(블로킹).
+// timeoutMs 안에 응답이 없으면 START를 다시 보내고, 이를 maxRetry회까지
+// 반복합니다. 전부 실패하면 success=false로 반환합니다.
+//
+// simpleSendFile()과 차이: simpleSendFile()은 START를 보내자마자 응답을
+// 기다리지 않고 바로 DATA를 쏘기 시작합니다("단순 전송" — 회선이 살아있는지만
+// 확인). 이 함수는 실제 프로토콜 설계대로 "상대가 세션을 인지했다"는 걸
+// 확인한 뒤에야 다음 단계(DATA 전송)로 넘어가게 해줍니다. 이후 DATA/END
+// 전송은 위 sendDataAndEnd()를 이어서 호출하면 됩니다.
+//
+// transport: 이미 open()되어 있어야 하고, ACK를 들을 수 있도록 RX 상태여야
+//            합니다(호출 전에 startRx() 필요 — 이 함수는 직접 안 함).
+// filePath: OTA_START에 실을 image_size/total_chunks 계산용.
+// targetDeviceId: OTA_START.target_device_id.
+// sessionId: 0을 넘기면 내부에서 랜덤 생성.
+// timeoutMs / maxRetry: 기본값 300ms / 5회 — docs/fsm-design.md의
+//                        HANDSHAKING 타임아웃/재시도 확정값과 동일하게
+//                        맞춤(실기기 실측 전까지는 추정값이라는 점도 동일).
+HandshakeResult performHandshake(
+    ITransport &transport,
+    const std::string &filePath,
+    uint32_t targetDeviceId,
+    uint32_t sessionId = 0,
+    int timeoutMs = 300,
+    int maxRetry = 5);
+
 #endif // SIMPLESENDER_H

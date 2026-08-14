@@ -4,7 +4,7 @@
 |---|---|
 | 대상 레포 | `gateway-ota` (`ota-protocol` v0.2 참조) |
 | 범위 | `.bin` 파일 분할(송신측) ~ 단순 전송 ~ 패킷 재조립(수신측 기준 로직) |
-| 최종 수정 | 2026-08-14 |
+| 최종 수정 | 2026-08-14 (핸드셰이크 추가) |
 | 관련 브랜치 | `feature/ota-core-split`(`develop` 병합 완료), `feature/simple-ota-send-test`(진행 중) |
 
 ## 1. 개요
@@ -53,9 +53,10 @@ DATA 전부 → OTA_END" 순서로 실행하는 조율(orchestration) 계층입�
 `core/`·`transport/`가 각자 한 가지 일만 하는 것과 달리, 이 계층은 둘을
 호출하는 흐름 자체를 담당합니다 — 그래서 `core/`가 아니라 별도 `session/`
 폴더에 둡니다(순수 변환 로직 자리인 `core/`의 정의를 지키기 위함). 지금은
-`simplesender`(ACK 대기·재전송 없는 단순 전송, 실기기 스모크테스트용)뿐이고,
-다음 단계로 예정된 `OtaSession`(FSM, ACK/재전송 담당)도 이 폴더에 들어갈
-예정입니다. 상세는 6절 참고.
+`simplesender`(ACK 대기·재전송 없는 단순 전송)와 `handshake`(START만 응답
+확인하는 핸드셰이크, `fsm-design.md`의 `HANDSHAKING` 상태 구현)가 있고,
+다음 단계로 예정된 `OtaSession`(FSM, 배치 ACK/재전송 담당)도 이 폴더에
+들어갈 예정입니다. 상세는 6절 참고.
 
 ### 2.5 테스트 (`tests/`)
 `tst_binsplitter.cpp` — Qt 없이 `g++`/CMake 어느 쪽으로든 실행 가능한 7개
@@ -182,15 +183,23 @@ for (const auto &chunk : chunks) {          // sequence 순서 보장 전제
 실패 시(`false` 반환) out 파라미터는 전혀 변경되지 않습니다 — 반환값을
 확인하지 않고 바로 읽어도 오염된 값이 섞이지 않도록 설계되어 있습니다.
 
-## 6. 단순 전송 — `session/simplesender.h` / `session/simplesender.cpp`
+## 6. 송신 로직 — 핸드셰이크 + 단순 전송 (`session/`)
 
-`OTA_START → DATA 전부 → OTA_END`를 ACK 대기·재전송 없이 순서대로 한 번에
-쏘는 루틴입니다. 목적은 신뢰성 있는 전송이 아니라, 회선(`Cc1101Transport`)과
-프로토콜 인코딩이 실기기에서 실제로 동작하는지 확인하는 스모크테스트 —
-`OtaSession`(FSM)이 구현되면 이 함수가 하던 역할(패킷 뼈대 구성)을 그대로
-재사용하면서 ACK 대기·재전송을 얹을 예정입니다.
+두 가지 경로가 있습니다.
 
-### 6.1 함수 시그니처
+- **`simpleSendFile()`** — `OTA_START → DATA 전부 → OTA_END`를 ACK 대기 없이
+  한 번에 쏘는 가장 단순한 루틴. 회선·인코딩이 죽지 않고 도는지만 확인하는
+  용도(6.1~6.2절).
+- **`performHandshake()` + `sendDataAndEnd()`** — START를 보내고 **응답을
+  기다린 뒤에야** DATA를 보내는, `fsm-design.md`의 `HANDSHAKING` 상태를
+  실제로 구현한 경로(6.3절). `tests/smoke_send_main.cpp`는 이제 이 경로를
+  씁니다.
+
+내부적으로 `simpleSendFile()`도 `sendDataAndEnd()`를 그대로 호출합니다 —
+"START 보내고 곧장 DATA로" vs "START 보내고 응답 기다린 뒤 DATA로"의 차이만
+있을 뿐, DATA/END를 만들고 보내는 로직 자체는 하나로 공유됩니다.
+
+### 6.1 `simpleSendFile()` — 단순 전송
 
 ```cpp
 SimpleSendResult simpleSendFile(
@@ -210,32 +219,83 @@ SimpleSendResult simpleSendFile(
 | `sessionId` | 재현 가능한 테스트가 필요하면 직접 지정, 아니면 0으로 자동 생성 |
 | `chunkDelayMs` | CC1101 드라이버가 이전 `write()`를 처리할 시간을 벌어주기 위한 값. 연속으로 너무 빨리 쏘면 유실 가능성이 있어 기본 10ms 대기(실측 기반 값은 아니고 추정치 — 실기기 테스트하며 조정 예정) |
 
-### 6.2 내부 동작
+내부 동작: ①`transport.isOpen()` 확인 ②파일 크기 확인 →
+`ota_protocol_total_chunks()`로 총 청크 개수 계산 ③`OTA_START` 인코딩+전송
+(`image_sha256`은 아직 0 — 6.4절 참고) ④곧장 `sendDataAndEnd()` 호출(응답
+안 기다림).
 
-1. `transport.isOpen()` 확인
-2. 파일 크기 확인 → `ota_protocol_total_chunks()`로 총 청크 개수 계산
-3. `OTA_START` 인코딩 + 전송 (`image_sha256`은 아직 0으로 채움 — 실제 SHA-256
-   계산 로직이 없고, 수신측도 이 단계에선 검증하지 않을 예정이라 지금은
-   의미 없는 값)
-4. `BinSplitter::split()`으로 청크 생성 → 개수가 2번에서 계산한 값과
+### 6.2 `sendDataAndEnd()` — DATA 전부 + END (핸드셰이크 이후 공용)
+
+```cpp
+SimpleSendResult sendDataAndEnd(
+    ITransport &transport,
+    const std::string &filePath,
+    uint32_t sessionId,
+    uint32_t imageSize,
+    uint32_t totalChunks,
+    int chunkSize = -1,
+    int chunkDelayMs = 10,
+    const std::function<void(const SimpleSendProgress &)> &onProgress = nullptr);
+```
+
+`simpleSendFile()`의 "OTA_START 이후" 부분만 떼어낸 함수입니다. `sessionId`/
+`imageSize`/`totalChunks`를 호출부(START를 이미 보낸 쪽)가 넘겨줍니다.
+
+1. `BinSplitter::split()`으로 청크 생성 → 넘겨받은 `totalChunks`와 개수가
    일치하는지 확인(불일치 시 실패 처리)
-5. 청크를 순서대로 `transport.send()` — 매 청크마다 `onProgress` 콜백 호출,
+2. 청크를 순서대로 `transport.send()` — 매 청크마다 `onProgress` 콜백 호출,
    `chunkDelayMs`만큼 대기
-6. `OTA_END` 인코딩 + 전송
+3. `OTA_END` 인코딩 + 전송
 
-### 6.3 CLI 진입점 — `tests/smoke_send_main.cpp`
+### 6.3 `performHandshake()` — `session/simplesender.h` / `.cpp`
+
+(`simpleSendFile`/`sendDataAndEnd`와 같은 파일입니다 — 처음엔
+`session/handshake.h`로 따로 뺐다가, 파일 개수가 계속 늘어나는 게
+싫다는 피드백을 받고 다시 합쳤습니다. 헷갈리지 않도록 파일 안에서 구역만
+분명히 나눠뒀습니다.)
+
+`fsm-design.md`의 `HANDSHAKING` 상태 구현입니다. OTA_START를 보내고
+**응답(ACK)이 올 때까지 기다립니다**(블로킹). 타임아웃 시 재전송 —
+`fsm-design.md`가 정해둔 값과 동일하게 기본 300ms 타임아웃 × 최대 5회
+재시도.
+
+```cpp
+HandshakeResult performHandshake(
+    ITransport &transport,
+    const std::string &filePath,
+    uint32_t targetDeviceId,
+    uint32_t sessionId = 0,
+    int timeoutMs = 300,
+    int maxRetry = 5);
+```
+
+내부 동작: `OTA_START` 인코딩 → `maxRetry`회까지 반복(START 전송 →
+`timeoutMs` 동안 `tryReceiveOnce()`로 폴링) → `session_id`와 `sequence`
+(START 응답은 `OTA_CONTROL_SEQUENCE`)가 둘 다 일치하는 `ACK`를 받으면 성공.
+일치하는 `NACK`를 받으면 사유 판단 없이 타임아웃과 동일하게 취급하고 다음
+시도로 넘어감(사유별 처리는 `OtaSession` 몫). 성공 시 반환되는
+`imageSize`/`totalChunks`를 그대로 `sendDataAndEnd()`에 넘기면 됩니다.
+
+### 6.4 CLI 진입점 — `tests/smoke_send_main.cpp`
 
 ```
 ota_smoke_send <device_path> <bin_file> [target_device_id_hex] [chunk_delay_ms] [ack_listen_ms]
 ```
 
-`simpleSendFile()`을 호출하는 얇은 래퍼입니다. argv 파싱, `Cc1101Transport`
-생성, 진행 상황/결과를 콘솔에 출력하는 역할만 하고 전송 로직 자체는 갖고
-있지 않습니다 — 실기기 없이 자동 실행되는 `ota_core_tests`(ctest 등록)와
-달리 `/dev/cc1101`이 있어야 동작하는 수동 실행 도구라 `add_test()`에는
+`performHandshake()` → 성공 시 `sendDataAndEnd()` → 다 보낸 뒤 남은 ACK를
+`ackListenMs` 동안 더 확인, 순서로 호출하는 얇은 CLI입니다. argv 파싱,
+`Cc1101Transport` 생성, 진행 상황/결과를 콘솔에 출력하는 역할만 하고 로직
+자체는 갖고 있지 않습니다. `Cc1101Transport::startRx()` 호출 시점이
+`OTA_START`를 보내기 **전**으로 되어 있음에 주의 — 핸드셰이크 응답을
+들으려면 START 전송 전부터 RX 상태여야 하기 때문입니다. [확인 필요] RX
+상태에서 `send()`가 문제없이 동작하는지는 드라이버 구현에 달려 있어
+실기기에서 확인해야 합니다.
+
+실기기 없이 자동 실행되는 `ota_core_tests`(ctest 등록)와 달리
+`/dev/cc1101`이 있어야 동작하는 수동 실행 도구라 `add_test()`에는
 등록하지 않습니다.
 
-### 6.4 수신측 스텁 — `session/simplereceiver.h` / `tests/smoke_recv_main.cpp`
+### 6.5 수신측 스텁 — `session/simplereceiver.h` / `tests/smoke_recv_main.cpp`
 
 송신측과 대칭되는 구조로, `tryReceiveOnce()`(핵심 로직, `session/`)가
 `transport.recv()`로 패킷 하나를 논블로킹 확인하고 type byte로 맞는
@@ -259,12 +319,15 @@ ACK를 화면에 보여줍니다 — 여기서도 재전송 판단은 하지 않
 화면에서 확인 가능하게만 합니다.
 
 **검증(실기기 없이)**: `ITransport`가 추상 인터페이스라는 점을 이용해
-실제 CC1101 대신 큐로 send/recv를 흉내 내는 가짜 transport로 두 단계 확인:
+실제 CC1101 대신 큐로 send/recv를 흉내 내는 가짜 transport로 확인:
 ① `simpleSendFile()`이 넣은 패킷을 `tryReceiveOnce()`가 그대로 다시 읽어
 필드까지 정확히 일치하는지(START 1개+DATA 3개+END 1개), ② 양방향 가짜
 링크로 receiver가 보낸 ACK 5개를 sender 쪽이 다시 읽어 session_id/
-result_code까지 일치하는지. 둘 다 통과. 실기기에서 남은 건 이제 순수하게
-무선 구간(칩·안테나·드라이버)뿐입니다.
+result_code까지 일치하는지, ③ `performHandshake()`가 실제로 응답을
+"기다리는" 동안(블로킹) receiver를 별도 스레드로 동시에 돌려 실시간
+응답 상황을 재현 — START 핸드셰이크 성공 → 이어서 DATA×2+END까지 정상
+처리(총 4개 패킷 송수신·ACK 확인). 전부 통과. 실기기에서 남은 건 이제
+순수하게 무선 구간(칩·안테나·드라이버)뿐입니다.
 
 ## 7. 재조립 — `ota_protocol_decode_data()` (`ota-protocol` 레포)
 
@@ -305,9 +368,10 @@ for (const auto &chunk : chunks) {          // sequence 순서 보장 전제
 ## 8. 알려진 제약 — 실제 무선 수신 시나리오
 
 4·7절의 분할/재조립 검증은 **순서대로, 누락 없이, 중복 없이** 도착하는
-가장 단순한 조건만 다룹니다. 6절의 `simplesender`도 ACK/재전송이 아예
-없으므로 마찬가지입니다. 실제 무선(RF) 수신에서는 다음이 추가로
-필요합니다.
+가장 단순한 조건만 다룹니다. `sendDataAndEnd()`(DATA 구간)도 청크마다
+응답을 기다리지 않고 이 조건을 그대로 전제합니다 — `performHandshake()`가
+확인하는 건 START 하나뿐이고, DATA 구간의 신뢰성은 여전히 없습니다. 실제
+무선(RF) 수신에서는 다음이 추가로 필요합니다.
 
 | 상황 | 필요 처리 | 현재 구현 여부 |
 |---|---|---|
@@ -321,11 +385,14 @@ for (const auto &chunk : chunks) {          // sequence 순서 보장 전제
 ## 9. 남은 작업
 
 - 실기기(라즈베리파이)에서 `ota_smoke_send`/`ota_smoke_recv` 실제 송수신 검증
-  (CC1101 셋팅 완료 후)
+  (CC1101 셋팅 완료 후) — 특히 RX 상태에서 `send()`가 정상 동작하는지
+  (6.4절 [확인 필요] 항목)
 - `simplesender`/`BinSplitter` 결과를 화면(`otamanager.cpp`)에서 실제로
   호출해 전송하는 연동
-- `OtaSession`(FSM) — 세션 시작, 배치 전송, ACK/NACK 처리, 종료를 담당하는
-  컨트롤러 (`session/`에 추가 예정)
+- `OtaSession`(FSM) — 배치 전송, 청크 단위 ACK/NACK 처리, 종료를 담당하는
+  컨트롤러 (`session/`에 추가 예정). 핸드셰이크(START)는 완료됐고, 나머지
+  단계(`SENDING_BATCH`/`WAITING_BATCH_ACK`/`RETRANSMITTING`/`WAITING_END_ACK`)가
+  남음
 - 8절의 실제 무선 수신 시나리오 대응 재조립 로직 (`simplereceiver`는 관찰만,
   정렬/재전송/중복제거는 아직 없음)
 
@@ -334,12 +401,13 @@ for (const auto &chunk : chunks) {          // sequence 순서 보장 전제
 | 역할 | 위치 |
 |---|---|
 | 분할 클래스 | `OTA_System/core/binsplitter.h`, `.cpp` |
-| 단순 전송(스모크테스트용) | `OTA_System/session/simplesender.h`, `.cpp` |
+| 단순 전송 + DATA/END 공용 로직 | `OTA_System/session/simplesender.h`, `.cpp` |
+| 핸드셰이크(START, 응답 대기) | `OTA_System/session/simplesender.h`, `.cpp` (`performHandshake()`) |
 | 송신 스모크테스트 CLI | `OTA_System/tests/smoke_send_main.cpp` |
-| 단순 수신(스모크테스트용 스텁) | `OTA_System/session/simplereceiver.h`, `.cpp` |
+| 단순 수신(스모크테스트용 스텁, ACK 반사 응답 포함) | `OTA_System/session/simplereceiver.h`, `.cpp` |
 | 수신 스모크테스트 CLI | `OTA_System/tests/smoke_recv_main.cpp` |
 | 분할+재조립 사용 예시(테스트) | `OTA_System/tests/tst_binsplitter.cpp` |
-| 인코딩/디코딩 함수 (`encode_data`/`decode_data`/`encode_start`/`encode_end`) | `ota-protocol` 레포 `include/ota_protocol.h` |
+| 인코딩/디코딩 함수 (`encode_data`/`decode_data`/`encode_start`/`encode_end`/`encode_ack`) | `ota-protocol` 레포 `include/ota_protocol.h` |
 | 테스트 항목별 설명 | [`binsplitter-tests.md`](binsplitter-tests.md) |
-| 세션 FSM 설계 | [`fsm-design.md`](fsm-design.md) |
+| 세션 FSM 설계 (`HANDSHAKING` 등 전체 상태) | [`fsm-design.md`](fsm-design.md) |
 | 패킷 분할/재전송 전략(프로토콜 레벨) | `ota-protocol` 레포 `docs/note/notion-data-transfer.md` |
