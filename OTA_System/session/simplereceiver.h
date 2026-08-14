@@ -44,10 +44,20 @@ struct ReceivedPacket
 // 바로 리턴)으로 한 번 확인합니다. 아직 도착한 게 없으면
 // kind==Unknown && raw가 빈 상태로 반환됩니다(에러 아님 — 호출부가 반복문
 // 안에서 계속 불러주는 폴링 방식 전제).
-//
-// [의도적으로 ACK/NACK을 돌려보내지 않음] 이름대로 "스텁"(stub, 나중에 채울
-// 임시 뼈대) — 받은 걸 보여주기만 하고 상대에게 응답하지 않습니다. 실제
-// 프로토콜 대화(ACK 응답, 재전송 요청)는 OtaSession(FSM) 몫입니다.
 ReceivedPacket tryReceiveOnce(ITransport &transport);
+
+// 받은 패킷 하나에 대해 OTA_ACK를 즉시 만들어서 돌려보냅니다("반사적으로
+// 응답하기"만 함 — 재전송 판단, 대기, 타임아웃 같은 건 전혀 없습니다. 그런
+// 세션 레벨 로직은 OtaSession(FSM) 몫이고, 여기선 그냥 "이 패킷 받았다"는
+// 응답 패킷 하나를 encode+send만 합니다).
+//
+// packet.kind가 Start/Data/End일 때만 동작합니다 — ACK/NACK/DISCOVER류는
+// ota_protocol.h 설계상 애초에 응답 대상이 아니라서, 그 외 kind로 호출하면
+// 아무것도 안 하고 false를 반환합니다.
+//
+// resultCode: ota_result_t 값(uint8_t로 받음 — 이 헤더가 ota_protocol.h
+// 타입에 직접 의존하지 않도록 하기 위함). 기본값 0은 OTA_RESULT_OK와 같음.
+bool sendAckFor(ITransport &transport, const ReceivedPacket &packet,
+                 uint8_t resultCode = 0 /* OTA_RESULT_OK */);
 
 #endif // SIMPLERECEIVER_H

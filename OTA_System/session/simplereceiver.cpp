@@ -85,3 +85,43 @@ ReceivedPacket tryReceiveOnce(ITransport &transport)
 
     return result;
 }
+
+bool sendAckFor(ITransport &transport, const ReceivedPacket &packet, uint8_t resultCode)
+{
+    ota_packet_type_t ackedType;
+    uint32_t sequence;
+
+    // START/END는 특정 청크가 아니라 제어 패킷 자체에 대한 응답이라
+    // sequence 자리에 OTA_CONTROL_SEQUENCE(전부 1)를 씀 — ota_protocol.h의
+    // 규칙 그대로.
+    switch (packet.kind) {
+    case ReceivedPacketKind::Start:
+        ackedType = OTA_PKT_START;
+        sequence = OTA_CONTROL_SEQUENCE;
+        break;
+    case ReceivedPacketKind::Data:
+        ackedType = OTA_PKT_DATA;
+        sequence = packet.sequence;
+        break;
+    case ReceivedPacketKind::End:
+        ackedType = OTA_PKT_END;
+        sequence = OTA_CONTROL_SEQUENCE;
+        break;
+    default:
+        return false; // ACK/NACK/DISCOVER류는 응답 대상이 아님
+    }
+
+    ota_ack_fields_t fields{};
+    fields.session_id = packet.sessionId;
+    fields.acknowledged_type = static_cast<uint8_t>(ackedType);
+    fields.sequence = sequence;
+    fields.result_code = resultCode;
+
+    uint8_t buffer[OTA_ACK_PACKET_SIZE];
+    const size_t written =
+        ota_protocol_encode_ack(buffer, sizeof(buffer), OTA_PKT_ACK, &fields);
+    if (written == 0)
+        return false;
+
+    return transport.send(std::vector<uint8_t>(buffer, buffer + written));
+}

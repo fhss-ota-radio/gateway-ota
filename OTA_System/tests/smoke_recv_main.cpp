@@ -126,5 +126,14 @@ int main(int argc, char *argv[])
             std::cout << "[smoke_recv] " << kindToString(packet.kind) << "\n";
             break;
         }
+
+        // Start/Data/End만 응답 대상 — 받았다는 확인(ACK)을 바로 돌려보냄.
+        // 재전송 판단·대기 없이 "이거 받았다"만 반사적으로 알려주는 것
+        // (session/simplereceiver.h의 sendAckFor 주석 참고).
+        if (packet.kind == ReceivedPacketKind::Start || packet.kind == ReceivedPacketKind::Data
+            || packet.kind == ReceivedPacketKind::End) {
+            const bool acked = sendAckFor(transport, packet);
+            std::cout << "[smoke_recv]   -> ACK " << (acked ? "전송함" : "전송 실패") << "\n";
+        }
     }
 }
