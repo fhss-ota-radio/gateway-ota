@@ -84,5 +84,6 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
       구현체. 실기기 2대로 51200byte 파일 전체 전송(핸드셰이크→DATA→END)
       검증 완료. **커널 드라이버 문제 해결되면 삭제 예정** — 자세한 경위는
       `docs/note/design-notes-gateway-ota-es.md` 18절,
-      `kernel-cc1101-spi/docs/pi-bringup-guide.md` 참고.
+      `kernel-cc1101-spi/docs/pi-bringup-guide.md` 참고. 빌드/실행 방법은
+      [`docs/testing-spidev-transport.md`](docs/testing-spidev-transport.md) 참고.
 
