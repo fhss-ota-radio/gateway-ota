@@ -19,6 +19,10 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
 
 ## 진행 상황
 
+> **최신 상세 현황(파일 구성/마일스톤/다음 할 일)은 `docs/roadmap.md` 참고**
+> (2026-08-15 갱신). 아래는 예전 기록이라 일부 계획(`LocalFileTransport` 등)이
+> 실제로는 다른 방식(`session/simplesender`·`simplereceiver`)으로 바뀌었습니다.
+
 ### 마일스톤 1 — Qt 프로젝트 세팅 및 화면 뼈대
 - [x] Qt 프로젝트 생성 (Widgets, CMake) — `OTA_System/`
 - [x] 화면 뼈대 구현 (`OtaManager` : `ui/otamanager.h/.cpp`)
@@ -73,4 +77,12 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
 - [x] `Cc1101Status`/`Cc1101RxMetadata` — `transport/cc1101_status.h` (통신 팀원 4·5의 `cc1101-radio-api.md`와 의미 통일)
 - [x] `Cc1101Transport` 실구현 — `transport/cc1101transport.h/.cpp` (POSIX `open(O_NONBLOCK)/write/poll+read/ioctl`), `transport/cc1101_ioctl.h`(UAPI 계약 헤더) 추가. `#if defined(__linux__)`로 감싸서 리눅스(라즈베리파이)에서만 실구현이 빌드되고, macOS 등 로컬 환경에서는 자동으로 안전한 폴백 스텁이 빌드됨(로컬 빌드 안 깨짐)
 - [x] 폴더 재구성 — `ui/`(화면) · `core/`(분할·CRC·프로토콜) · `transport/`(ITransport·CC1101) · `tests/`
+- [x] **(2026-08-16, 임시)** `SpidevTransport` — `transport/spidevtransport.h/.cpp` +
+      `tests/smoke_spidev_send_main.cpp`/`smoke_spidev_recv_main.cpp`. 커널
+      드라이버(`/dev/cc1101`)의 GDO2 인터럽트 감지 문제로 당장 못 쓰는 동안,
+      `/dev/spidevX.Y`를 직접 폴링해서 CC1101을 제어하는 우회용 `ITransport`
+      구현체. 실기기 2대로 51200byte 파일 전체 전송(핸드셰이크→DATA→END)
+      검증 완료. **커널 드라이버 문제 해결되면 삭제 예정** — 자세한 경위는
+      `docs/note/design-notes-gateway-ota-es.md` 18절,
+      `kernel-cc1101-spi/docs/pi-bringup-guide.md` 참고.
 
