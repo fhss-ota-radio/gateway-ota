@@ -58,6 +58,8 @@ add_library(ota_core STATIC
     transport/cc1101_status.h
     transport/cc1101transport.h
     transport/cc1101transport.cpp
+    transport/spidevtransport.h
+    transport/spidevtransport.cpp
 )
 target_compile_features(ota_core PUBLIC cxx_std_17)
 target_include_directories(ota_core PUBLIC
@@ -126,6 +128,27 @@ add_executable(ota_smoke_recv
     tests/smoke_recv_main.cpp
 )
 target_link_libraries(ota_smoke_recv
+    PRIVATE
+        ota_core
+)
+
+# ---------- ota_smoke_spidev_send / ota_smoke_spidev_recv: 커널 드라이버 우회용 ----------
+# smoke_send/smoke_recv와 로직은 동일하되 Cc1101Transport(/dev/cc1101, 커널
+# 드라이버 필요) 대신 SpidevTransport(/dev/spidevX.Y, 커널 드라이버 불필요)를
+# 씀. 자세한 사용법은 docs/testing-spidev-transport.md 참고. 이것도 실기기
+# 전용 수동 도구라 add_test()에는 등록하지 않음.
+add_executable(ota_smoke_spidev_send
+    tests/smoke_spidev_send_main.cpp
+)
+target_link_libraries(ota_smoke_spidev_send
+    PRIVATE
+        ota_core
+)
+
+add_executable(ota_smoke_spidev_recv
+    tests/smoke_spidev_recv_main.cpp
+)
+target_link_libraries(ota_smoke_spidev_recv
     PRIVATE
         ota_core
 )
