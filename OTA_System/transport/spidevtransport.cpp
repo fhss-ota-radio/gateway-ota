@@ -188,6 +188,37 @@ std::vector<uint8_t> SpidevTransport::recv()
     if ((rxbytes & 0x7F) == 0)
         return {}; // 아직 아무 것도 안 옴 (ITransport::recv() 계약: 없으면 빈 벡터)
 
+    // [버그 수정 2/2, 2026-08-16] "수신이 끝난 뒤에" 읽기 시작한다.
+    //
+    // RXBYTES가 0이 아니라는 건 "패킷이 도착하기 시작했다"일 뿐, "다 도착했다"가
+    // 아니다. 가변길이 모드에서는 첫 바이트가 길이바이트인데, 도착 중인 상태에서
+    // 성급히 읽으면 그 1바이트가 아직 FIFO에 안정적으로 올라오지 않아 엉뚱한
+    // 값을 길이로 읽고, 이후 본문 전체가 1바이트씩 밀려버린다.
+    //
+    // 실기기 증상(2026-08-16): 깨진 패킷들이 하나같이 길이바이트(0x3C=60)가
+    // 페이로드 앞에 그대로 붙은 채 "3C 02 EE BE 07 51..." 형태로 올라왔고,
+    // 그 결과 session_id가 0x5107beee -> 0x07beeeee처럼 한 바이트씩 시프트됨.
+    //
+    // 해결: RXBYTES가 더 이상 늘어나지 않을 때(= 패킷 하나가 다 들어왔을 때)
+    // 까지 기다렸다가 읽는다. 우리 패킷은 전부 64byte FIFO 안에 들어가는
+    // 크기라 이 방식이 안전하다.
+    {
+        uint8_t prev = rxbytes & 0x7F;
+        for (int i = 0; i < 40; ++i) {      // 최대 ~20ms
+            ::usleep(500);
+            const uint8_t now = readStatusReg(kAddrRXBYTES);
+            if (now & 0x80) {               // 대기 중 오버플로
+                strobe(kStrobeSIDLE);
+                strobe(kStrobeSFRX);
+                strobe(kStrobeSRX);
+                return {};
+            }
+            if ((now & 0x7F) == prev)
+                break;                      // 안 늘어남 = 수신 완료
+            prev = now & 0x7F;
+        }
+    }
+
     uint8_t lenTx[2] = {static_cast<uint8_t>(kAddrFIFO | kReadBurst), 0};
     uint8_t lenRx[2];
     xfer(lenTx, lenRx, 2);
@@ -195,13 +226,51 @@ std::vector<uint8_t> SpidevTransport::recv()
 
     std::vector<uint8_t> result;
     if (len > 0 && len <= kMaxPacketBody) {
-        // 헤더에코(1) + 데이터(len) + RSSI(1) + LQI/CRC(1)
-        std::vector<uint8_t> buf(static_cast<size_t>(len) + 3, 0);
-        buf[0] = kAddrFIFO | kReadBurst;
-        xfer(buf.data(), buf.data(), static_cast<int>(buf.size()));
-        result.assign(buf.begin() + 1, buf.begin() + 1 + len);
-        // CRC_AUTOFLUSH=1이라 CRC 실패 패킷은 애초에 FIFO에 안 들어오므로
-        // 여기 도달했다면 CRC는 이미 통과한 것으로 간주해도 됨.
+        // [버그 수정, 2026-08-16] 패킷 전체가 FIFO에 도착할 때까지 기다린다.
+        //
+        // 가변길이(variable length) 모드에서 RX FIFO는 무선으로 바이트가
+        // 들어오는 대로 조금씩 채워진다. 즉 RXBYTES는 수신 도중 계속 늘어난다.
+        // 그런데 이전 코드는 RXBYTES가 0만 아니면 곧바로 길이바이트를 읽고
+        // 이어서 본문 len개를 통째로 읽어버렸다 — 아직 도착하지 않은 부분까지
+        // 읽으려 하면 FIFO 언더플로(underflow)가 나서 CC1101이 쓰레기 값을
+        // 돌려주고, 그게 패킷에 섞여 디코딩이 깨진다.
+        //
+        // 실기기 증상(2026-08-16): RXBYTES=0x05(5바이트만 도착)인데 길이바이트는
+        // 49로 읽혀서 49바이트를 마저 읽어버림 -> target_device_id가
+        // 0xffffffff여야 하는데 0xfffffff9로, imageSize/totalChunks도 엉뚱한
+        // 값으로 깨져서 올라옴. (design-notes 17절에서 "SPI 트랜잭션 3번으로
+        // 나뉘어 있어 타이밍이 어긋날 수 있다"고 원인 추정만 해뒀던 그 버그)
+        //
+        // 해결: 길이를 알았으니 "본문(len) + 상태바이트(RSSI, LQI/CRC 2개)"가
+        // 전부 FIFO에 들어올 때까지 기다렸다가 읽는다. 48byte짜리 최대 패킷도
+        // 38.4kbps에서 ~13ms면 다 들어오므로 50ms 타임아웃이면 충분하다.
+        constexpr int kStatusBytes = 2;               // APPEND_STATUS=1 -> RSSI, LQI/CRC
+        const int needed = static_cast<int>(len) + kStatusBytes;
+        bool complete = false;
+        for (int i = 0; i < 50; ++i) {
+            const uint8_t now = readStatusReg(kAddrRXBYTES);
+            if (now & 0x80)                            // 대기 중 오버플로 -> 폐기
+                break;
+            if ((now & 0x7F) >= needed) {
+                complete = true;
+                break;
+            }
+            ::usleep(1000);
+        }
+
+        if (complete) {
+            // 헤더에코(1) + 데이터(len) + RSSI(1) + LQI/CRC(1)
+            std::vector<uint8_t> buf(static_cast<size_t>(len) + 3, 0);
+            buf[0] = kAddrFIFO | kReadBurst;
+            xfer(buf.data(), buf.data(), static_cast<int>(buf.size()));
+            result.assign(buf.begin() + 1, buf.begin() + 1 + len);
+            // CRC_AUTOFLUSH=1이라 CRC 실패 패킷은 애초에 FIFO에 안 들어오므로
+            // 여기 도달했다면 CRC는 이미 통과한 것으로 간주해도 됨.
+        } else {
+            std::fprintf(stderr,
+                         "[spidev] 패킷 미완성 폐기 (len=%u, 대기 타임아웃)\n",
+                         static_cast<unsigned>(len));
+        }
     }
 
     strobe(kStrobeSIDLE);
