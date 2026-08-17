@@ -417,8 +417,9 @@ for (const auto &chunk : chunks) {          // sequence 순서 보장 전제
 | 일부 패킷 유실 | NACK/재전송으로 채움 | 미구현 |
 | 재전송으로 인한 중복 도착 | 중복 sequence 제거 | 미구현 |
 
-이 로직은 `OtaSession`(FSM, [`fsm-design.md`](fsm-design.md) 참고) 또는
-별도 수신측 프로그램에서 구현될 예정이며, 현재 브랜치 범위 밖입니다.
+이 로직은 `OtaSession`(FSM) 또는 별도 수신측 프로그램에서 구현될 예정이며,
+현재 브랜치 범위 밖입니다. 설계 문서(`fsm-design.md`)는 마일스톤 4 착수
+시점에 함께 커밋할 예정입니다 — 구현하며 설계를 고쳐야 하므로.
 
 ## 9. 남은 작업
 
@@ -447,5 +448,5 @@ for (const auto &chunk : chunks) {          // sequence 순서 보장 전제
 | 분할+재조립 사용 예시(테스트) | `OTA_System/tests/tst_binsplitter.cpp` |
 | 인코딩/디코딩 함수 (`encode_data`/`decode_data`/`encode_start`/`encode_end`/`encode_ack`) | `ota-protocol` 레포 `include/ota_protocol.h` |
 | 테스트 항목별 설명 | [`binsplitter-tests.md`](binsplitter-tests.md) |
-| 세션 FSM 설계 (`HANDSHAKING` 등 전체 상태) | [`fsm-design.md`](fsm-design.md) |
+| 세션 FSM 설계 (`HANDSHAKING` 등 전체 상태) | `fsm-design.md` (마일스톤 4 착수 시 커밋 예정) |
 | 패킷 분할/재전송 전략(프로토콜 레벨) | `ota-protocol` 레포 `docs/note/notion-data-transfer.md` |
