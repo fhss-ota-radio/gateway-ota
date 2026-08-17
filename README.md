@@ -76,13 +76,22 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
 - [x] `ITransport` 인터페이스 — `transport/itransport.h` (open/close/isOpen/send/recv)
 - [x] `Cc1101Status`/`Cc1101RxMetadata` — `transport/cc1101_status.h` (통신 팀원 4·5의 `cc1101-radio-api.md`와 의미 통일)
 - [x] `Cc1101Transport` 실구현 — `transport/cc1101transport.h/.cpp` (POSIX `open(O_NONBLOCK)/write/poll+read/ioctl`), `transport/cc1101_ioctl.h`(UAPI 계약 헤더) 추가. `#if defined(__linux__)`로 감싸서 리눅스(라즈베리파이)에서만 실구현이 빌드되고, macOS 등 로컬 환경에서는 자동으로 안전한 폴백 스텁이 빌드됨(로컬 빌드 안 깨짐)
+  - **[미검증, 2026-08-16] 실기기 핸드셰이크는 아직 한 번도 성공한 적 없음.**
+    `recv()`가 커널 드라이버의 GDO2 인터럽트로만 채워지는 큐를 읽는데,
+    그 GDO2 인터럽트가 실기기에서 한 번도 안 울리는 버그가 있어(원인
+    불명, 오실로스코프 필요) `performHandshake()`가 응답을 받을 수 있는
+    구조 자체가 아님. 실제로 핸드셰이크+전송까지 검증된 경로는 아래
+    `SpidevTransport`(임시 우회, GDO 인터럽트 안 씀)뿐임 — 자세한 내용은
+    `docs/note/design-notes-gateway-ota-es.md` 18절,
+    `kernel-cc1101-spi/docs/pi-bringup-guide.md` 8절 참고.
 - [x] 폴더 재구성 — `ui/`(화면) · `core/`(분할·CRC·프로토콜) · `transport/`(ITransport·CC1101) · `tests/`
 - [x] **(2026-08-16, 임시)** `SpidevTransport` — `transport/spidevtransport.h/.cpp` +
       `tests/smoke_spidev_send_main.cpp`/`smoke_spidev_recv_main.cpp`. 커널
       드라이버(`/dev/cc1101`)의 GDO2 인터럽트 감지 문제로 당장 못 쓰는 동안,
       `/dev/spidevX.Y`를 직접 폴링해서 CC1101을 제어하는 우회용 `ITransport`
       구현체. 실기기 2대로 51200byte 파일 전체 전송(핸드셰이크→DATA→END)
-      검증 완료. **커널 드라이버 문제 해결되면 삭제 예정** — 자세한 경위는
+      **1067/1067 청크 전량 수신 검증 완료**(디코딩 실패 0건).
+      **커널 드라이버 문제 해결되면 삭제 예정** — 자세한 경위는
       `docs/note/design-notes-gateway-ota-es.md` 18절,
       `kernel-cc1101-spi/docs/pi-bringup-guide.md` 참고. 빌드/실행 방법은
       [`docs/testing-spidev-transport.md`](docs/testing-spidev-transport.md) 참고.

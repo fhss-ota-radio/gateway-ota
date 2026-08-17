@@ -276,6 +276,18 @@ HandshakeResult performHandshake(
 시도로 넘어감(사유별 처리는 `OtaSession` 몫). 성공 시 반환되는
 `imageSize`/`totalChunks`를 그대로 `sendDataAndEnd()`에 넘기면 됩니다.
 
+> **[미검증, 2026-08-16] `Cc1101Transport`(진짜 커널 드라이버 경로)에서는
+> 이 함수가 실기기로 한 번도 성공한 적 없습니다.** `Cc1101Transport::recv()`는
+> 커널 드라이버가 GDO2 인터럽트 핸들러 안에서만 채우는 큐(kfifo)를
+> `poll()`로 확인하는 구조인데, 그 GDO2 인터럽트 자체가 실기기에서 한
+> 번도 안 울리는 버그가 있어(`/proc/interrupts`의 `cc1101-gdo2` 카운트가
+> 항상 0) `recv()`가 항상 빈 값만 반환합니다 — 즉 몇 번을 재시도해도
+> 원천적으로 응답을 받을 수 없는 상태입니다. 지금까지 이 함수가 실기기로
+> 검증된 건 `SpidevTransport`(GDO 인터럽트를 안 쓰는 폴링 방식 우회 구현,
+> [`testing-spidev-transport.md`](testing-spidev-transport.md) 참고)
+> 경로뿐입니다. 자세한 내용은 `docs/note/design-notes-gateway-ota-es.md`
+> 18절, `kernel-cc1101-spi/docs/pi-bringup-guide.md` 8절 참고.
+
 ### 6.4 CLI 진입점 — `tests/smoke_send_main.cpp`
 
 ```
