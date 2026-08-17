@@ -322,8 +322,34 @@ ota_smoke_send <device_path> <bin_file> [target_device_id_hex] [chunk_delay_ms] 
 보이는지 + 받았다는 신호가 다시 송신측까지 가는지"만 확인하는 관찰용입니다.
 
 ```
-ota_smoke_recv <device_path>
+ota_smoke_recv <device_path> [저장할_파일]
 ```
+
+**[추가 2026-08-16] 파일 재조립 — 무결성 확인용**
+
+두 번째 인자로 파일 경로를 주면 받은 DATA를 재조립해서 그 파일에 씁니다.
+그동안은 로그만 찍어서 *"1067개 전부 받았다"*는 건 알아도 **내용이 원본과
+같은지는 확인할 수 없었습니다.** CRC는 패킷 단위 검사일 뿐이라, 순서 뒤바뀜·
+중복·특정 청크 유실은 CRC를 다 통과하고도 파일을 깨뜨릴 수 있습니다.
+
+동작 방식: `sequence`를 그대로 파일 오프셋으로 씁니다
+(`seq × OTA_MAX_PAYLOAD_SIZE`). 그래서 패킷이 뒤바뀌어 도착해도 제자리에
+기록되고, 유실된 구간은 0으로 남아 어디가 빠졌는지 드러납니다.
+`OTA_START`에서 `imageSize`만큼 파일을 미리 늘려두는 것도 같은 이유입니다.
+
+`OTA_END`를 받으면 채워진/중복/누락 청크 수를 요약하고, 누락이 있으면 빠진
+`seq`를 앞쪽 20개까지 보여줍니다. 최종 확인은 해시 비교로 합니다:
+
+```sh
+# 수신측
+sudo ./ota_smoke_recv /dev/cc1101 recv.bin
+# 전송 끝난 뒤 양쪽에서
+sha256sum 원본.bin      # 송신측
+sha256sum recv.bin      # 수신측
+```
+
+> `ota_smoke_spidev_recv`(우회 경로 버전)에는 아직 이 기능이 없습니다 —
+> 필요하면 같은 방식으로 옮기면 됩니다.
 
 송신측(`ota_smoke_send`)도 모든 청크를 다 보낸 뒤, `ackListenMs`(기본
 2000ms, CLI 5번째 인자로 조정 가능) 동안 `tryReceiveOnce()`로 들어오는

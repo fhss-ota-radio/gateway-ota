@@ -22,10 +22,16 @@
 #include "cc1101transport.h"
 #include "simplereceiver.h"
 
+extern "C" {
+#include "ota_protocol.h"
+}
+
 #include <chrono>
 #include <cstdio>
+#include <fstream>
 #include <iostream>
 #include <thread>
+#include <vector>
 
 namespace {
 
@@ -57,12 +63,35 @@ void printHex(const std::vector<uint8_t> &data)
 int main(int argc, char *argv[])
 {
     if (argc < 2) {
-        std::cerr << "사용법: " << argv[0] << " <device_path>\n"
-                  << "  예: " << argv[0] << " /dev/cc1101\n";
+        std::cerr << "사용법: " << argv[0] << " <device_path> [저장할_파일]\n"
+                  << "  예: " << argv[0] << " /dev/cc1101\n"
+                  << "      " << argv[0] << " /dev/cc1101 recv.bin\n"
+                  << "\n"
+                  << "  저장할_파일을 주면 받은 DATA를 sequence 순서대로 재조립해서\n"
+                  << "  그 파일에 씁니다. 원본과 같은지는 아래처럼 확인하세요:\n"
+                  << "    (송신측) sha256sum 원본.bin\n"
+                  << "    (수신측) sha256sum recv.bin\n";
         return 1;
     }
 
     const std::string devicePath = argv[1];
+
+    // [추가 2026-08-16] 파일 재조립 기능.
+    //
+    // 그동안 이 프로그램은 로그만 찍어서, "1067개 전부 받았다"는 건 알아도
+    // "내용이 원본과 같은지"는 확인할 수 없었다. CRC는 패킷 단위 검사일 뿐
+    // 파일 전체가 올바르게 복원됐는지는 보장하지 않는다(순서 뒤바뀜, 중복,
+    // 특정 청크만 유실 등은 CRC를 다 통과하고도 파일을 깨뜨릴 수 있다).
+    //
+    // sequence 값을 그대로 파일 오프셋으로 써서(seq * OTA_MAX_PAYLOAD_SIZE)
+    // 순서와 무관하게 제자리에 기록한다 — 패킷이 뒤바뀌어 도착해도 결과는
+    // 같고, 유실된 구간은 0으로 남으므로 어디가 빠졌는지도 드러난다.
+    const std::string outPath = (argc >= 3) ? argv[2] : std::string();
+    std::fstream outFile;
+    std::vector<bool> seqSeen;      // 중복/누락 판정용
+    uint32_t expectedChunks = 0;
+    uint32_t writtenChunks = 0;
+    uint32_t duplicateChunks = 0;
 
     Cc1101Transport transport(devicePath);
     if (!transport.open()) {
@@ -102,6 +131,34 @@ int main(int argc, char *argv[])
                        << " target=0x" << std::hex << packet.targetDeviceId << std::dec
                        << " imageSize=" << packet.imageSize
                        << " totalChunks=" << packet.totalChunks << "\n";
+
+            // START를 받은 시점에 파일을 새로 만든다(같은 세션이 재시작되면
+            // 이전 내용이 남지 않도록 truncate). imageSize만큼 미리 늘려둬서,
+            // 유실된 구간이 0으로 남아 어디가 빠졌는지 드러나게 한다.
+            if (!outPath.empty()) {
+                outFile.close();
+                outFile.clear();
+                outFile.open(outPath, std::ios::binary | std::ios::out | std::ios::trunc);
+                if (!outFile) {
+                    std::cerr << "[smoke_recv] 파일 열기 실패: " << outPath << "\n";
+                } else {
+                    if (packet.imageSize > 0) {
+                        outFile.seekp(static_cast<std::streamoff>(packet.imageSize) - 1);
+                        const char zero = 0;
+                        outFile.write(&zero, 1);
+                    }
+                    // 재사용 위해 읽기까지 가능한 모드로 다시 열기
+                    outFile.close();
+                    outFile.open(outPath,
+                                  std::ios::binary | std::ios::in | std::ios::out);
+                    expectedChunks = packet.totalChunks;
+                    seqSeen.assign(expectedChunks, false);
+                    writtenChunks = 0;
+                    duplicateChunks = 0;
+                    std::cout << "[smoke_recv]   -> " << outPath
+                              << " 생성 (" << packet.imageSize << "byte 예약)\n";
+                }
+            }
             break;
         case ReceivedPacketKind::Data: {
             ++dataCount;
@@ -113,6 +170,31 @@ int main(int argc, char *argv[])
             if (totalChunksHint > 0)
                 std::cout << "/" << totalChunksHint;
             std::cout << ")\n";
+
+            // payload는 raw의 헤더 뒤부터 — ReceivedPacket에 payload 전용
+            // 필드가 없어서 raw에서 잘라 쓴다(헤더 12byte + payload).
+            if (outFile.is_open() && packet.payloadLength > 0
+                && packet.raw.size() >= OTA_DATA_HEADER_SIZE + packet.payloadLength) {
+                if (packet.sequence < expectedChunks) {
+                    if (seqSeen[packet.sequence])
+                        ++duplicateChunks;
+                    else
+                        ++writtenChunks;
+                    seqSeen[packet.sequence] = true;
+
+                    const std::streamoff offset =
+                        static_cast<std::streamoff>(packet.sequence) * OTA_MAX_PAYLOAD_SIZE;
+                    outFile.seekp(offset);
+                    outFile.write(
+                        reinterpret_cast<const char *>(packet.raw.data() + OTA_DATA_HEADER_SIZE),
+                        packet.payloadLength);
+                    outFile.flush();
+                } else {
+                    std::cerr << "[smoke_recv]   ! seq=" << packet.sequence
+                              << " 가 totalChunks(" << expectedChunks
+                              << ") 범위를 넘음 - 저장 생략\n";
+                }
+            }
             break;
         }
         case ReceivedPacketKind::End:
@@ -121,6 +203,37 @@ int main(int argc, char *argv[])
                        << " imageSize=" << packet.imageSize
                        << " totalChunks=" << packet.totalChunks
                        << " (실제 받은 DATA 개수=" << dataCount << ")\n";
+
+            if (outFile.is_open()) {
+                outFile.flush();
+                std::cout << "[smoke_recv] === 재조립 결과 ===\n"
+                          << "  파일        : " << outPath << "\n"
+                          << "  기대 청크   : " << expectedChunks << "\n"
+                          << "  채워진 청크 : " << writtenChunks << "\n"
+                          << "  중복 수신   : " << duplicateChunks << "\n";
+
+                // 빠진 seq를 앞쪽 몇 개만 보여준다(전부 찍으면 화면이 넘침).
+                if (writtenChunks < expectedChunks) {
+                    std::cout << "  누락 청크   : " << (expectedChunks - writtenChunks)
+                              << "개 — seq ";
+                    int shown = 0;
+                    for (uint32_t i = 0; i < expectedChunks && shown < 20; ++i) {
+                        if (!seqSeen[i]) {
+                            std::cout << i << " ";
+                            ++shown;
+                        }
+                    }
+                    if (expectedChunks - writtenChunks > 20)
+                        std::cout << "...";
+                    std::cout << "\n"
+                              << "  => 누락 구간은 0으로 남아 있으므로 원본과 다릅니다.\n";
+                } else {
+                    std::cout << "  누락 청크   : 없음\n"
+                              << "  => 모든 청크가 제자리에 기록됨. 아래로 최종 확인:\n"
+                              << "       (송신측) sha256sum <원본.bin>\n"
+                              << "       (수신측) sha256sum " << outPath << "\n";
+                }
+            }
             break;
         default:
             std::cout << "[smoke_recv] " << kindToString(packet.kind) << "\n";
