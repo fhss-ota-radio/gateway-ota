@@ -6,17 +6,22 @@
 #include <cstdint>
 #include <string>
 
-// [임시 검증용 구현, 2026-08-14] 커널 드라이버(cc1101.ko)가 지금 라즈베리파이들의
-// 커스텀 빌드 커널(pi_bsp — 헤더/소스 원본이 이 파이들엔 없음, MODVERSIONS
-// 심볼 불일치로 강제 로드도 커널이 거부함)에서 올라가지 않아서, 커널 모듈을
-// 완전히 건너뛰고 리눅스 표준 spidev(/dev/spidevX.Y) 유저공간 인터페이스로
-// CC1101을 직접 제어하는 "임시" ITransport 구현체입니다.
+// [진단 도구 — 제품 코드가 아닙니다]
 //
-// [정식 구현이 아님] Cc1101Transport(/dev/cc1101, 커널 드라이버 기반)가 정식
-// 경로이고, 이건 그게 막혀있는 동안만 쓰는 우회용입니다. 커널 드라이버 문제가
-// 풀리면 이 파일은 지워도 됩니다. ITransport 인터페이스가 동일하므로
-// session/simplesender.h·simplereceiver.h(performHandshake 등)는 손대지
-// 않고 그대로 이 클래스로 실기기 검증할 수 있습니다.
+// 커널 모듈을 완전히 건너뛰고 리눅스 표준 spidev(/dev/spidevX.Y) 유저공간
+// 인터페이스로 CC1101을 직접 폴링하는 ITransport 구현체입니다.
+//
+// [정식 경로는 Cc1101Transport입니다] /dev/cc1101(커널 드라이버 기반)이 정식
+// 경로이고 2026-08-16 실기기 검증을 통과했습니다. 이 클래스는 처음엔 그게
+// 막혀있는 동안의 우회로로 만들었지만, 지금은 **통제 실험(control experiment)
+// 도구**로 남겨둔 것입니다 — 커널·인터럽트·kfifo를 전부 우회하므로, 이걸로
+// 되는지 여부만으로 "원인이 하드웨어냐 커널이냐"를 한 번에 가를 수 있습니다.
+// 실제로 2026-08-16 디버깅에서 이 비교가 결정적이었습니다.
+//
+// ITransport 인터페이스가 동일하므로 session/simplesender.h·simplereceiver.h
+// (performHandshake 등)는 손대지 않고 그대로 이 클래스로 검증할 수 있습니다.
+//
+// 존재 이유·사용 시점·삭제 조건은 tools/spidev/README.md 참고.
 //
 // [주소 필터를 끔] kernel-cc1101-spi의 기본 레지스터값(PKTCTRL1=0x0D)은
 // CC1101 하드웨어 주소필터(ADR_CHK)가 켜져 있어서, 패킷의 첫 바이트를

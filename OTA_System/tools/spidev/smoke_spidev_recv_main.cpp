@@ -1,7 +1,10 @@
-// [임시 검증용, 2026-08-14] smoke_recv_main.cpp와 완전히 동일한 로직이지만,
+// [진단 도구 — 제품 코드 아님] tests/smoke_recv_main.cpp와 로직은 동일하지만,
 // Cc1101Transport(/dev/cc1101, 커널 드라이버 필요) 대신 SpidevTransport
-// (/dev/spidevX.Y, 커널 드라이버 불필요)를 씁니다. transport/spidevtransport.h
-// 상단 주석 참고.
+// (/dev/spidevX.Y, 커널 드라이버 불필요)를 씁니다.
+// 존재 이유·사용 시점·삭제 조건은 tools/spidev/README.md 참고.
+//
+// 참고: 정식 경로용 smoke_recv는 파일 재조립(2번째 인자)을 지원하지만
+// 이 진단용 버전은 지원하지 않습니다 — 여기서는 "전파가 오는가"만 봅니다.
 //
 // 사용법:
 //   ota_smoke_spidev_recv <spidev_path>

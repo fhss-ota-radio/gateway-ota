@@ -44,6 +44,15 @@ extern "C" {
 namespace {
 
 // "AABBCC" 같은 hex 문자열을 uint32_t로 파싱. 실패하면 false.
+//
+// [수정 2026-08-17] 브로드캐스트("ffffffff")를 거부하던 버그.
+// 원인: 두 상수의 적용 범위를 혼동했습니다.
+//   - OTA_DEVICE_ID_MAX (0xFFFFFF)  = DISCOVER_ACK의 device_id 필드 상한.
+//     와이어에 3byte로만 실리므로(MAC 뒤 3byte) 이 값을 넘을 수 없음
+//   - OTA_BROADCAST_DEVICE_ID (0xFFFFFFFF) = START의 target_device_id 특수값.
+//     이 필드는 와이어에서 4byte라 3byte 상한이 애초에 적용되지 않음
+// 여기서 파싱하는 건 target_device_id인데 DISCOVER_ACK 쪽 상한으로 검사해서,
+// 정작 기본값인 브로드캐스트를 커맨드라인으로 지정할 수 없었습니다.
 bool parseHexDeviceId(const std::string &text, uint32_t *out)
 {
     if (text.empty())
@@ -53,7 +62,8 @@ bool parseHexDeviceId(const std::string &text, uint32_t *out)
         const unsigned long value = std::stoul(text, &consumed, 16);
         if (consumed != text.size())
             return false;
-        if (value > OTA_DEVICE_ID_MAX)
+        // 브로드캐스트는 3byte 상한을 넘는 특수값이므로 먼저 통과시킴
+        if (value != OTA_BROADCAST_DEVICE_ID && value > OTA_DEVICE_ID_MAX)
             return false;
         *out = static_cast<uint32_t>(value);
         return true;
@@ -66,8 +76,11 @@ void printUsage(const char *argv0)
 {
     std::cerr << "사용법: " << argv0
               << " <device_path> <bin_file> [target_device_id_hex] [chunk_delay_ms] [ack_listen_ms]\n"
+              << "  target_device_id_hex: 생략하면 브로드캐스트(ffffffff).\n"
+              << "                        특정 단말은 MAC 뒤 3byte hex (예: AABBCC)\n"
               << "  예: " << argv0 << " /dev/cc1101 firmware.bin\n"
-              << "  예: " << argv0 << " /dev/cc1101 firmware.bin AABBCC 10 2000\n";
+              << "  예: " << argv0 << " /dev/cc1101 firmware.bin AABBCC 40 2000\n"
+              << "  예: " << argv0 << " /dev/cc1101 firmware.bin ffffffff 40 2000\n";
 }
 
 const char *ackKindToString(ReceivedPacketKind kind)

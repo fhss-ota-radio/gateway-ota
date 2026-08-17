@@ -192,8 +192,6 @@ std::vector<uint8_t> SpidevTransport::recv()
         return {};
 
     const uint8_t rxbytes = readStatusReg(kAddrRXBYTES);
-    if (rxbytes & 0x7F) // [임시 디버그, 문제 해결되면 지울 것]
-        std::fprintf(stderr, "[spidev DEBUG] RXBYTES=0x%02x\n", rxbytes);
     if (rxbytes & 0x80) { // RX FIFO overflow
         strobe(kStrobeSIDLE);
         strobe(kStrobeSFRX);

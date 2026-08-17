@@ -1,13 +1,15 @@
-// [임시 검증용, 2026-08-14] smoke_send_main.cpp와 완전히 동일한 로직이지만,
-// Cc1101Transport(/dev/cc1101, 커널 드라이버 필요) 대신 SpidevTransport
-// (/dev/spidevX.Y, 커널 드라이버 불필요)를 씁니다. 커널 드라이버가 이
-// 라즈베리파이들에서 못 올라가는 동안 실제 gateway-ota 프로토콜 로직
-// (performHandshake/sendDataAndEnd)을 실기기로 검증하기 위한 용도입니다.
-// transport/spidevtransport.h 상단 주석 참고.
+// [진단 도구 — 제품 코드 아님] tests/smoke_send_main.cpp와 로직은 완전히
+// 동일하지만, Cc1101Transport(/dev/cc1101, 커널 드라이버 필요) 대신
+// SpidevTransport(/dev/spidevX.Y, 커널 드라이버 불필요)를 씁니다.
+//
+// 커널 계층을 전부 우회하므로, 정식 경로가 안 될 때 "원인이 하드웨어냐
+// 커널이냐"를 가르는 통제 실험(control experiment)에 씁니다.
+// 존재 이유·사용 시점·삭제 조건은 tools/spidev/README.md 참고.
 //
 // 사용법:
 //   ota_smoke_spidev_send <spidev_path> <bin_file> [target_device_id_hex] [chunk_delay_ms] [ack_listen_ms]
 //   예: ota_smoke_spidev_send /dev/spidev0.0 firmware.bin
+//   예: ota_smoke_spidev_send /dev/spidev0.0 test.bin ffffffff 40 2000
 
 #include "spidevtransport.h"
 #include "simplereceiver.h"
@@ -24,6 +26,8 @@ extern "C" {
 
 namespace {
 
+// [수정 2026-08-17] 브로드캐스트("ffffffff")를 거부하던 버그 — 자세한 경위는
+// tests/smoke_send_main.cpp의 같은 함수 주석 참고.
 bool parseHexDeviceId(const std::string &text, uint32_t *out)
 {
     if (text.empty())
@@ -33,7 +37,8 @@ bool parseHexDeviceId(const std::string &text, uint32_t *out)
         const unsigned long value = std::stoul(text, &consumed, 16);
         if (consumed != text.size())
             return false;
-        if (value > OTA_DEVICE_ID_MAX)
+        // 브로드캐스트는 3byte 상한(OTA_DEVICE_ID_MAX)을 넘는 특수값
+        if (value != OTA_BROADCAST_DEVICE_ID && value > OTA_DEVICE_ID_MAX)
             return false;
         *out = static_cast<uint32_t>(value);
         return true;

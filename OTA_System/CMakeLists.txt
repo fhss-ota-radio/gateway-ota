@@ -58,8 +58,6 @@ add_library(ota_core STATIC
     transport/cc1101_status.h
     transport/cc1101transport.h
     transport/cc1101transport.cpp
-    transport/spidevtransport.h
-    transport/spidevtransport.cpp
 )
 target_compile_features(ota_core PUBLIC cxx_std_17)
 target_include_directories(ota_core PUBLIC
@@ -132,23 +130,41 @@ target_link_libraries(ota_smoke_recv
         ota_core
 )
 
-# ---------- ota_smoke_spidev_send / ota_smoke_spidev_recv: 커널 드라이버 우회용 ----------
-# smoke_send/smoke_recv와 로직은 동일하되 Cc1101Transport(/dev/cc1101, 커널
-# 드라이버 필요) 대신 SpidevTransport(/dev/spidevX.Y, 커널 드라이버 불필요)를
-# 씀. 자세한 사용법은 docs/testing-spidev-transport.md 참고. 이것도 실기기
-# 전용 수동 도구라 add_test()에는 등록하지 않음.
+# ---------- tools/spidev: 진단 도구 (제품 코드 아님) ----------
+# SpidevTransport는 커널 드라이버(/dev/cc1101)를 우회해서 /dev/spidevX.Y로 CC1101을
+# 직접 폴링하는 ITransport 구현체입니다. "안 되는 원인이 하드웨어냐 커널이냐"를
+# 가르는 통제 실험(control experiment) 용도이며, 정식 전송 경로가 아닙니다.
+#
+# **의도적으로 ota_core에 넣지 않았습니다.** ota_core는 GUI 앱(OTA_System)과
+# 유닛테스트가 함께 링크하는 제품 라이브러리인데, 앱이 절대 쓰지 않는 진단
+# 코드를 거기 넣으면 "제품에 포함된 코드"처럼 보이고 나중에 지우기도 어려워집니다.
+# 그래서 아래 두 실행파일이 spidevtransport.cpp를 직접 컴파일합니다 —
+# 이 폴더를 삭제하고 이 블록만 지우면 깔끔하게 제거됩니다.
+#
+# 존재 이유·사용 시점·삭제 조건은 tools/spidev/README.md 참고.
+# 실기기 전용 수동 도구라 add_test()에는 등록하지 않습니다.
 add_executable(ota_smoke_spidev_send
-    tests/smoke_spidev_send_main.cpp
+    tools/spidev/smoke_spidev_send_main.cpp
+    tools/spidev/spidevtransport.cpp
 )
 target_link_libraries(ota_smoke_spidev_send
     PRIVATE
         ota_core
 )
+target_include_directories(ota_smoke_spidev_send
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/spidev
+)
 
 add_executable(ota_smoke_spidev_recv
-    tests/smoke_spidev_recv_main.cpp
+    tools/spidev/smoke_spidev_recv_main.cpp
+    tools/spidev/spidevtransport.cpp
 )
 target_link_libraries(ota_smoke_spidev_recv
     PRIVATE
         ota_core
+)
+target_include_directories(ota_smoke_spidev_recv
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/spidev
 )
