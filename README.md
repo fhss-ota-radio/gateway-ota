@@ -19,9 +19,23 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
 
 ## 진행 상황
 
-> **최신 상세 현황(파일 구성/마일스톤/다음 할 일)은 `docs/roadmap.md` 참고**
-> (2026-08-15 갱신). 아래는 예전 기록이라 일부 계획(`LocalFileTransport` 등)이
+| 마일스톤 | 내용 | 상태 |
+|---|---|---|
+| 1 | Qt 프로젝트 세팅 및 화면 뼈대 | ✅ 완료 |
+| 2 | 전송 계층 추상화 + `Cc1101Transport` | ✅ 완료 (실기기 1067/1067) |
+| 3 | BIN 분할 + CRC | ✅ 완료 |
+| 4 | 핸드셰이크 + 송수신 + ACK | 🟡 핸드셰이크·개별 ACK 완료 / 배치 ACK·재전송·`OtaSession` FSM 미착수 |
+| 5 | 실기기 통합 검증 | 🟡 전송 성공, `sha256sum` 무결성 검증만 남음 |
+
+> **최신 상세 현황(파일 구성/마일스톤/다음 할 일)은
+> [`docs/roadmap.md`](docs/roadmap.md) 참고** (2026-08-17 갱신).
+> 아래 체크리스트는 예전 기록이라 일부 계획(`LocalFileTransport` 등)이
 > 실제로는 다른 방식(`session/simplesender`·`simplereceiver`)으로 바뀌었습니다.
+
+> **⚠️ 싱크워드 주의**: `SYNC1/SYNC0`이 OTA 전용값 `0x2D/0xD4`입니다
+> (팀 공용 기본값 `0xD3/0x91`에서 변경 — 팀원들끼리 서로 패킷을 받는 문제가
+> 있었음). `kernel-cc1101-spi/cc1101_core.c`의 `cc1101_default_regs[]`와
+> **같은 값이어야** 통신됩니다.
 
 ### 마일스톤 1 — Qt 프로젝트 세팅 및 화면 뼈대
 - [x] Qt 프로젝트 생성 (Widgets, CMake) — `OTA_System/`
@@ -86,14 +100,24 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
     - 현재 송신 시 청크 간 대기 **40ms** 필요(`chunkDelayMs`). 10ms에서는
       수신이 못 따라가 패킷 경계가 밀림 — 수신 처리량 개선은 남은 과제.
 - [x] 폴더 재구성 — `ui/`(화면) · `core/`(분할·CRC·프로토콜) · `transport/`(ITransport·CC1101) · `tests/`
-- [x] **(2026-08-16, 임시)** `SpidevTransport` — `transport/spidevtransport.h/.cpp` +
-      `tests/smoke_spidev_send_main.cpp`/`smoke_spidev_recv_main.cpp`. 커널
-      드라이버(`/dev/cc1101`)의 GDO2 인터럽트 감지 문제로 당장 못 쓰는 동안,
-      `/dev/spidevX.Y`를 직접 폴링해서 CC1101을 제어하는 우회용 `ITransport`
-      구현체. 실기기 2대로 51200byte 파일 전체 전송(핸드셰이크→DATA→END)
-      **1067/1067 청크 전량 수신 검증 완료**(디코딩 실패 0건).
-      **커널 드라이버 문제 해결되면 삭제 예정** — 자세한 경위는
-      `docs/note/design-notes-gateway-ota-es.md` 18절,
-      `kernel-cc1101-spi/docs/pi-bringup-guide.md` 참고. 빌드/실행 방법은
+- [x] **(2026-08-17)** `SpidevTransport`를 진단 도구로 재분류 —
+      [`OTA_System/tools/spidev/`](OTA_System/tools/spidev/README.md).
+      커널 드라이버가 막혀 있던 동안의 우회로였으나, 정식 경로가 열린 뒤에도
+      **커널 계층을 우회하는 통제 실험(control experiment) 도구**로 남겼습니다.
+      "안 되는 원인이 하드웨어냐 커널이냐"를 한 번에 가를 수 있어서, 실제로
+      2026-08-16 디버깅에서 결정적이었습니다.
+      제품 라이브러리(`ota_core`)에는 **의도적으로 넣지 않았습니다** — 폴더
+      하나만 지우면 제거되도록. 존재 이유·삭제 조건은 위 README,
+      빌드/실행법은
       [`docs/testing-spidev-transport.md`](docs/testing-spidev-transport.md) 참고.
+
+## 문서
+
+| 문서 | 언제 보나 |
+|---|---|
+| [`docs/roadmap.md`](docs/roadmap.md) | 현재 진행 상황·다음 할 일 (**여기부터**) |
+| [`docs/file-transfer-guide.md`](docs/file-transfer-guide.md) | 파일 전송이 코드 안에서 어떻게 도는지 |
+| [`docs/testing-spidev-transport.md`](docs/testing-spidev-transport.md) | 진단 경로 빌드/실행법 |
+| `kernel-cc1101-spi/docs/troubleshooting-cc1101.md` | **CC1101이 안 될 때** |
+| `kernel-cc1101-spi/docs/driver-changes-handoff-2026-08-17.md` | 커널 드라이버 변경 내역 (담당자용) |
 

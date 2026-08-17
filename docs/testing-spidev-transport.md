@@ -2,7 +2,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 대상 파일 | `transport/spidevtransport.h/.cpp`, `tests/smoke_spidev_send_main.cpp`, `tests/smoke_spidev_recv_main.cpp` |
+| 대상 파일 | `OTA_System/tools/spidev/` 폴더 전체 ([README](../OTA_System/tools/spidev/README.md)) |
 | 목적 | `/dev/cc1101` 커널 드라이버 없이, `/dev/spidevX.Y`로 직접 CC1101을 제어해서 실기기로 전체 OTA 흐름(핸드셰이크→DATA→END) 검증 |
 | 실행 환경 | 라즈베리파이 2대 (실기기 전용, 로컬/CI에서는 안 돌아감) |
 | 배경/설계 이유 | `docs/file-transfer-guide.md` 2.2·6절, `docs/note/design-notes-gateway-ota-es.md` 18절 |
@@ -10,14 +10,13 @@
 이 문서는 **"어떻게 실행하는지"**만 다룹니다. 코드 내부 동작 원리(핸드셰이크
 로직, `ITransport` 구조 등)는 `docs/file-transfer-guide.md`를 참고하세요.
 
-> **[2026-08-16 갱신] 정식 경로(`Cc1101Transport`, `/dev/cc1101` 커널
-> 드라이버)도 이제 실기기 1067/1067로 검증 완료됐습니다.** 따라서 이
-> `SpidevTransport`는 더 이상 "유일한 동작 경로"가 아니며, **삭제 후보**입니다.
+> **[2026-08-17 갱신] 정식 경로(`Cc1101Transport`, `/dev/cc1101` 커널
+> 드라이버)가 실기기 1067/1067로 검증 완료됐습니다.** 이 `SpidevTransport`는
+> 더 이상 "유일한 동작 경로"가 아니며, 이제 **진단 도구로 성격이 바뀌었습니다.**
 >
-> 다만 당분간 남겨두는 이유: 소프트웨어 큐 없이 칩 FIFO를 직접 폴링하는
-> 구조라, 문제가 생겼을 때 커널 드라이버와 비교하는 **통제 실험용**으로
-> 유용합니다. 실제로 이번에 "하드웨어냐 커널이냐"를 가르는 데 이 경로가
-> 결정적이었습니다.
+> 그에 맞춰 파일을 `OTA_System/tools/spidev/`로 옮기고 제품 라이브러리
+> (`ota_core`)에서 분리했습니다. 남겨둔 이유와 삭제 조건은
+> [`tools/spidev/README.md`](../OTA_System/tools/spidev/README.md)에 정리했습니다.
 >
 > 자세한 경위는 `docs/note/design-notes-gateway-ota-es.md` 18~21절 참고.
 
@@ -93,14 +92,16 @@ cmake --build build --target ota_smoke_spidev_send ota_smoke_spidev_recv
 
 ```sh
 cd OTA_System
-g++ -std=c++17 -I. -Icore -Itransport -Isession -I../../ota-protocol/include \
+g++ -std=c++17 -I. -Icore -Itransport -Isession -Itools/spidev \
+  -I../../ota-protocol/include \
   core/binsplitter.cpp session/simplesender.cpp session/simplereceiver.cpp \
-  transport/spidevtransport.cpp tests/smoke_spidev_send_main.cpp \
+  tools/spidev/spidevtransport.cpp tools/spidev/smoke_spidev_send_main.cpp \
   -o ota_smoke_spidev_send
 
-g++ -std=c++17 -I. -Icore -Itransport -Isession -I../../ota-protocol/include \
-  core/binsplitter.cpp session/simplesender.cpp session/simplereceiver.cpp \
-  transport/spidevtransport.cpp tests/smoke_spidev_recv_main.cpp \
+g++ -std=c++17 -I. -Icore -Itransport -Isession -Itools/spidev \
+  -I../../ota-protocol/include \
+  session/simplereceiver.cpp \
+  tools/spidev/spidevtransport.cpp tools/spidev/smoke_spidev_recv_main.cpp \
   -o ota_smoke_spidev_recv
 ```
 
@@ -186,8 +187,17 @@ ota_smoke_spidev_send <spidev_path> <bin_file> [target_device_id_hex] [chunk_del
 
 | 수신측 화면 | 의미 | 볼 곳 |
 |---|---|---|
-| `RXBYTES=` 줄이 **한 줄도 안 나옴** | 무선 신호 자체가 안 들어옴 | **물리 계층** — 안테나 접촉(가장 흔함), 전원, SPI 배선 |
-| `RXBYTES=`는 나오는데 값이 깨짐/디코딩 실패 | 신호는 오는데 읽기가 잘못됨 | **소프트웨어** — `recv()` 타이밍 등 |
+| **아무 줄도 안 나옴** (송신측은 계속 쏘는데) | 무선 신호 자체가 안 들어옴 | **물리 계층** — 안테나(가장 흔함), 전원, SPI 배선, 싱크워드 불일치 |
+| `디코딩 실패 (Nbyte): ...` 가 나옴 | 신호는 오는데 해석이 틀림 | **소프트웨어** — `recv()` 타이밍, 또는 남의 패킷 |
+| `[spidev] 패킷 미완성 폐기` 가 나옴 | 패킷이 다 도착하기 전에 대기가 끝남 | 송신 속도 과다 → `chunk_delay_ms` 증가 |
+
+> **[2026-08-17] 이전 버전 문서는 `RXBYTES=` 로그를 기준으로 삼았는데, 그건
+> 원인 추적용 임시 디버그 출력이라 제거했습니다.** 지금은 패킷마다 stderr를
+> 채우지 않고, 위 세 가지로 구분합니다.
+>
+> 더 정밀하게 보려면 임시로 다시 넣기보다 `kernel-cc1101-spi/tools/cc1101_diag`를
+> 쓰는 게 낫습니다 — 칩 레지스터와 `MARCSTATE`를 직접 읽어주므로 추측이
+> 필요 없습니다.
 
 이 구분이 디버깅 시간을 가장 크게 줄여줍니다. 그리고 **송수신 역할을 서로
 바꿔서**(pi06↔pi24) 테스트하면 "어느 방향/어느 보드가 죽었는지"를 빠르게
@@ -195,8 +205,17 @@ ota_smoke_spidev_send <spidev_path> <bin_file> [target_device_id_hex] [chunk_del
 
 ## 5. 종료 후 정리
 
-`SpidevTransport`는 임시 우회 코드입니다. `Cc1101Transport`(커널 드라이버
-경유)의 GDO2 인터럽트 감지 문제가 해결되면 `transport/spidevtransport.h/.cpp`,
-이 문서, `tests/smoke_spidev_*_main.cpp`는 전부 삭제 대상입니다 — 자세한
-경위는 `docs/note/design-notes-gateway-ota-es.md` 18절,
+`SpidevTransport`는 제품 코드가 아니라 진단 도구입니다. **삭제할 때는
+`OTA_System/tools/spidev/` 폴더와 이 문서를 지우고,
+`OTA_System/CMakeLists.txt`의 `tools/spidev` 블록만 제거하면 됩니다** —
+`ota_core`에 넣지 않은 이유가 이것입니다.
+
+언제 지워도 되는지의 판단 기준은
+[`tools/spidev/README.md`](../OTA_System/tools/spidev/README.md)의
+"언제 지워도 되나"에 정리했습니다. 경위는
+`docs/note/design-notes-gateway-ota-es.md` 18~21절,
 `kernel-cc1101-spi/docs/pi-bringup-guide.md` 참고.
+
+> **지우기 전 확인**: 이 도구는 커널 계층을 우회하는 유일한 비교 기준입니다.
+> 지운 뒤에 "커널 문제인지 하드웨어 문제인지" 가를 다른 수단이 있는지
+> 먼저 확인하세요.
