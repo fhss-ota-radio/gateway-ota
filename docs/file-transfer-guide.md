@@ -286,7 +286,7 @@ HandshakeResult performHandshake(
 > 디코딩 성공률이 4개 중 1개꼴로 떨어짐). 수신 처리량 개선은 남은 과제입니다.
 >
 > 자세한 경위는 `docs/note/design-notes-gateway-ota-es.md` 18~21절,
-> `kernel-cc1101-spi/docs/driver-changes-handoff-2026-08-16.md` 참고.
+> `kernel-cc1101-spi/docs/driver-changes-handoff-2026-08-17.md` 참고.
 
 ### 6.4 CLI 진입점 — `tests/smoke_send_main.cpp`
 

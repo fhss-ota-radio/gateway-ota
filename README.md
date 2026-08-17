@@ -82,7 +82,7 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
     불량 ②팀원들과 싱크워드가 겹쳐 남의 트래픽이 커널 RX 큐를 채운 것
     ③송신 완료 후 RX 재진입 처리였음 — 전부 해결.
     자세한 경위는 `docs/note/design-notes-gateway-ota-es.md` 18~21절,
-    `kernel-cc1101-spi/docs/driver-changes-handoff-2026-08-16.md` 참고.
+    `kernel-cc1101-spi/docs/driver-changes-handoff-2026-08-17.md` 참고.
     - 현재 송신 시 청크 간 대기 **40ms** 필요(`chunkDelayMs`). 10ms에서는
       수신이 못 따라가 패킷 경계가 밀림 — 수신 처리량 개선은 남은 과제.
 - [x] 폴더 재구성 — `ui/`(화면) · `core/`(분할·CRC·프로토콜) · `transport/`(ITransport·CC1101) · `tests/`
