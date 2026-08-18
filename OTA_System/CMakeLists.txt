@@ -54,6 +54,8 @@ add_library(ota_core STATIC
     session/simplesender.cpp
     session/simplereceiver.h
     session/simplereceiver.cpp
+    session/otasession.h
+    session/otasession.cpp
     transport/itransport.h
     transport/cc1101_status.h
     transport/cc1101transport.h
@@ -110,6 +112,19 @@ target_link_libraries(ota_core_tests
         ota_core
 )
 add_test(NAME ota_core_tests COMMAND ota_core_tests)
+
+# ---------- ota_session_tests: OtaSession(FSM) 배치ACK/재전송 로직 검증 ----------
+# tst_binsplitter.cpp와 별개 실행파일로 둔 이유: 기존 관례(파일 하나 = main() 하나 =
+# 실행파일 하나)를 그대로 따름. FakeTransport(인메모리)로 실기기 없이 검증하므로
+# ota_core_tests와 마찬가지로 add_test()에 등록해 ctest로 자동 실행됨.
+add_executable(ota_session_tests
+    tests/tst_otasession.cpp
+)
+target_link_libraries(ota_session_tests
+    PRIVATE
+        ota_core
+)
+add_test(NAME ota_session_tests COMMAND ota_session_tests)
 
 # ---------- ota_smoke_send / ota_smoke_recv: 실기기(CC1101) 스모크테스트용 CLI ----------
 # /dev/cc1101이 실제로 있어야 동작하는 수동 실행 도구라서 add_test()에는 등록하지
