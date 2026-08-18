@@ -18,7 +18,7 @@
 | 1 | Qt 프로젝트 세팅 및 화면 뼈대 | ✅ 완료 |
 | 2 | 전송 계층 추상화 (`ITransport`) + `Cc1101Transport` 실구현 | ✅ **완료 (2026-08-16 실기기 검증 통과, 1067/1067)** |
 | 3 | BIN 분할 + CRC (`ota-protocol` 연동) | ✅ 완료 |
-| 4 | 핸드셰이크 + 단순 송수신 + ACK (당초 계획이던 `OtaSession` FSM 통짜 구현 대신, 더 작은 단위로 쪼개서 점진적으로 구현) | 🟡 진행 중 — 핸드셰이크·개별 ACK까지 완료, **배치 ACK·재전송·`OtaSession` 통합은 미착수 → 남은 최대 덩어리** |
+| 4 | 핸드셰이크 + 단순 송수신 + ACK (당초 계획이던 `OtaSession` FSM 통짜 구현 대신, 더 작은 단위로 쪼개서 점진적으로 구현) | 🟡 진행 중 — **`OtaSession`(배치 ACK+선택적 재전송) 구현 완료(2026-08-18), 유닛테스트 7개 통과.** 실기기 검증·화면 연결·`DISCOVER`는 아직 |
 | 5 | 실기기 통합 검증 (라즈베리파이 2대) | ✅ **완료 (2026-08-17)** — 파일 전송 + 재조립 무결성 검증 통과 |
 
 > **[2026-08-17 갱신 안내]** 이 문서의 이전 버전(8/15 기준)은 마일스톤 2를
@@ -53,7 +53,9 @@
 | `transport/cc1101_ioctl.h`, `cc1101_status.h` | 커널 드라이버와 공유하는 계약 헤더(ioctl 번호·구조체), 상태값 타입 | 완료 |
 | `session/simplesender.h/.cpp` | `simpleSendFile()`(ACK 없이 순서대로 쏘기만 함) + `performHandshake()`(START 보내고 ACK 올 때까지 재시도) + `sendDataAndEnd()` | 완료 |
 | `session/simplereceiver.h/.cpp` | `tryReceiveOnce()`(패킷 하나 받아서 종류 구분) + `sendAckFor()`(받으면 반사적으로 ACK 응답, 재전송 판단은 안 함) | 완료 |
+| `session/otasession.h/.cpp` | **`OtaSession`(FSM)** — 배치(윈도우) 단위 ACK + 누락분만 선택적 재전송(Selective-Repeat), 핸드셰이크/END까지 상태로 관리. `docs/fsm-design.md` §6 알고리즘 구현체 | **구현 완료(2026-08-18), 유닛테스트 7개 통과.** 실기기 미검증·화면 미연결·`DISCOVER` 미포함(아래 3절 참고) |
 | `tests/tst_binsplitter.cpp` | `BinSplitter` 자동 유닛테스트 (ctest 등록됨) | 완료 |
+| `tests/tst_otasession.cpp` | `OtaSession` 자동 유닛테스트 — `FakeTransport`(인메모리)로 핸드셰이크/배치ACK/NACK재전송/타임아웃/재시도초과/END NACK/일시정지 시나리오 검증 (ctest 등록됨) | 완료, 7개 케이스 통과 |
 | `tests/smoke_send_main.cpp`, `smoke_recv_main.cpp` | `Cc1101Transport` 기반 실기기 수동 테스트 CLI (ctest 미등록) | **실기기 검증 완료.** `smoke_recv`는 2번째 인자로 받은 파일 재조립까지 지원(무결성 검증은 미실행) |
 | `tools/spidev/` (폴더 전체) | **[진단 도구, 제품 코드 아님]** 커널 계층을 우회해 `/dev/spidevX.Y`로 CC1101을 직접 폴링 — "원인이 하드웨어냐 커널이냐"를 가르는 통제 실험용. `ota_core`에 안 들어감 | 유지 (삭제 조건은 `tools/spidev/README.md`) |
 
@@ -97,18 +99,34 @@
 - [x] `sendAckFor()` — Start/Data/End 받으면 반사적으로 ACK 응답 (재전송 판단 없음)
 - [x] `performHandshake()` — START를 보내고 ACK 올 때까지 대기(타임아웃 300ms×5회 재시도),
       실패하면 데이터 전송 자체를 시작 안 함
-- [ ] 배치(윈도우) 단위 ACK + 누락분만 재전송(`RETRANSMITTING`) — 미착수.
-      오늘 실기기 테스트로 "청크마다 개별 ACK가 필요하다", "리시버가 먼저
-      타임아웃 NACK을 보낼 수 있다"는 ESP32 쪽 실제 구현 방식을 확인해둠
-      (`design-notes-FHSS-project-es.md` 5절) — 이 요구사항에 맞춰서 설계
-- [ ] `PAUSED`/`FAILED`/`COMPLETED` 같은 명시적 상태 관리 — 미착수
-- [ ] 위 로직들을 하나의 `OtaSession`(FSM) 클래스로 통합 — 미착수. 지금은
-      `simplesender`/`simplereceiver`의 함수들을 CLI(`tests/smoke_*_main.cpp`)가
-      순서대로 호출하는 구조라, 화면(`otamanager.cpp`)에서 쓰려면 상태 관리
-      계층이 필요함
+- [x] **배치(윈도우) 단위 ACK + 누락분만 재전송(`RETRANSMITTING`) — 구현 완료(2026-08-18)**.
+      `OtaSession::tickWaitingBatchAck()`가 `docs/fsm-design.md` §6 알고리즘 그대로
+      동작: 슬롯(청크)별 개별 ACK/NACK 처리, NACK은 타임아웃 안 기다리고 즉시
+      재전송("이중 방어"), 타임아웃은 슬롯별 독립 타이머로 감지. `batchSize`(기본 5),
+      타임아웃/재시도(기본 300ms×5회)는 생성자 파라미터
+- [x] **`PAUSED`/`FAILED`/`COMPLETED`(+`Idle`/`Handshaking`/`SendingBatch`/
+      `WaitingBatchAck`/`Retransmitting`/`WaitingEndAck`) 명시적 상태 관리 —
+      `OtaSessionState` enum + `state()`/`setOnStateChanged()`로 구현**
+- [x] **`OtaSession`(FSM) 클래스로 통합 — `session/otasession.h/.cpp`**.
+      `simplesender`/`simplereceiver`의 START/END 인코딩·`tryReceiveOnce()`를
+      그대로 재사용하고, 그 위에 배치 루프·타이머·재시도 카운터를 얹음.
+      `tick(nowMs)`를 주기 호출하는 구조라 Qt `QTimer`로 그대로 감쌀 수 있음
+- [ ] **실기기(라즈베리파이 2대) 검증 — 미착수.** 지금까지는
+      `FakeTransport`(인메모리)로 로직만 검증했습니다(유닛테스트 7개, 아래 표).
+      NACK 경로는 특히 주의: `simplereceiver.cpp`의 `sendAckFor()`가 현재
+      NACK을 실제로 보내지 않아서(항상 `OTA_PKT_ACK`만 생성), 이 부분은
+      아직 시뮬레이션으로만 검증됐고 실제 CRC 오류 상황에서 어떻게
+      동작할지는 리시버 쪽에 NACK 발신 로직을 추가해야 실기기로 확인 가능
 - [ ] `DISCOVER`/`DISCOVER_ACK` 기반 기기 탐색 흐름 — 프로토콜 레벨 타입/인코딩은
-      `ota-protocol`에 이미 있음, `gateway-ota` 쪽 사용 로직은 미착수
-- [ ] `otamanager.cpp`(화면)에 위 로직 연결 — 미착수
+      `ota-protocol`에 이미 있음, `gateway-ota` 쪽 사용 로직은 미착수.
+      `OtaSession`은 의도적으로 이 부분을 포함하지 않음(아래 참고)
+- [ ] `otamanager.cpp`(화면)에 실제 전송 로직 연결 — 미착수
+
+> **`OtaSession`이 `docs/fsm-design.md` 전체 상태표를 구현하지는 않습니다.**
+> `DISCONNECTED`/`CONNECTED_IDLE`/`FILE_READY`/`DISCOVERING`/`SELECTING`은
+> 연결·파일선택·기기조회처럼 화면이 담당할 상위 흐름이라 빠졌고, `start()`가
+> `targetDeviceId`를 파라미터로 바로 받는 걸로 대신합니다. "세션이 시작된
+> 이후"(`HANDSHAKING` ~ `COMPLETED`/`FAILED`)만 이 클래스의 책임입니다.
 
 ---
 
@@ -218,25 +236,27 @@ cmp -l test.bin recv.bin | awk '{print int(($1-1)/48)}' | sort -n | uniq -c
 
 ### 다음 실질 작업 — 마일스톤 4 마무리
 
-3. **배치 ACK + 누락분 재전송** 설계·구현. ESP32 쪽 실제 동작
-   (청크마다 개별 ACK, 리시버 선제 타임아웃 NACK)에 맞춤 —
-   `design-notes-FHSS-project-es.md` 5절
-4. `simplesender`/`simplereceiver`를 **`OtaSession`(FSM)으로 통합**.
-   지금은 CLI가 함수를 순서대로 호출하는 구조라, 화면에 붙이려면 상태 관리
-   계층이 필요함 — 이게 마일스톤 4의 핵심 남은 덩어리
-5. `otamanager.cpp`(화면)에 실제 전송 로직 연결
+3. ~~배치 ACK + 누락분 재전송 설계·구현~~ **완료 (2026-08-18)** —
+   `session/otasession.h/.cpp`, 유닛테스트 `tests/tst_otasession.cpp`
+4. ~~`simplesender`/`simplereceiver`를 `OtaSession`(FSM)으로 통합~~ **완료 (2026-08-18)**
+5. **`OtaSession`을 실기기(라즈베리파이 2대)로 검증** — 지금까지는
+   `FakeTransport`로 로직만 확인. 특히 배치 크기(5)·타임아웃(300ms)이 실제
+   RF 손실 패턴(2026-08-17 측정: 최대 7개 연속 손실)에 맞는지 확인 필요 —
+   `docs/note/design-notes-gateway-ota-es.md` 23절
+6. `otamanager.cpp`(화면)에 실제 전송 로직 연결 — `OtaSession::tick()`을
+   Qt `QTimer`로 주기 호출, `setOnStateChanged()`로 진행률바·로그 갱신
 
 ### 성능 / 팀 협의
 
-6. **`chunkDelayMs`를 40ms 아래로** — 현재 1067청크에 약 43초. 10ms에서는
+7. **`chunkDelayMs`를 40ms 아래로** — 현재 1067청크에 약 43초. 10ms에서는
    패킷 경계가 밀림. `out_rearm`에서 `SFRX` 없이 `SRX`만 하는 것이 관련
    있을 수 있음(유저공간 구현은 매번 `SIDLE; SFRX; SRX`로 완전히 비움)
-7. `ota-protocol`의 `OTA_BROADCAST_DEVICE_ID`(0xFFFFFFFF) vs
+8. `ota-protocol`의 `OTA_BROADCAST_DEVICE_ID`(0xFFFFFFFF) vs
    `OTA_DEVICE_ID_MAX`(0xFFFFFF) 범위 모순 — 팀 합의 필요
-8. **누가 어떤 주파수/싱크워드/채널을 쓰는지 팀 관리표 만들기** —
+9. **누가 어떤 주파수/싱크워드/채널을 쓰는지 팀 관리표 만들기** —
    이번 충돌 사고의 근본 원인
-9. `DISCOVER`/`DISCOVER_ACK` 기반 기기 탐색 흐름 구현
-10. ESP32 쪽 `main/fsm.c`의 OTA 수신 배선(TODO, 담당 "팀2") 완료 후
+10. `DISCOVER`/`DISCOVER_ACK` 기반 기기 탐색 흐름 구현
+11. ESP32 쪽 `main/fsm.c`의 OTA 수신 배선(TODO, 담당 "팀2") 완료 후
     실제 게이트웨이→ESP32 종단 간 테스트
 
 ---
