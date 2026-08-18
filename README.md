@@ -115,7 +115,8 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
 
 | 문서 | 언제 보나 |
 |---|---|
-| [`docs/roadmap.md`](docs/roadmap.md) | 현재 진행 상황·다음 할 일 (**여기부터**) |
+| [`docs/quickstart-two-pi-test.md`](docs/quickstart-two-pi-test.md) | **처음 받았을 때 — 클론부터 실기기 전송까지 따라하기** |
+| [`docs/roadmap.md`](docs/roadmap.md) | 현재 진행 상황·다음 할 일 |
 | [`docs/file-transfer-guide.md`](docs/file-transfer-guide.md) | 파일 전송이 코드 안에서 어떻게 도는지 |
 | [`docs/testing-spidev-transport.md`](docs/testing-spidev-transport.md) | 진단 경로 빌드/실행법 |
 | `kernel-cc1101-spi/docs/troubleshooting-cc1101.md` | **CC1101이 안 될 때** |
