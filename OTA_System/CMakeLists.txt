@@ -33,10 +33,15 @@ endif()
 message(STATUS "ota-protocol include: ${OTA_PROTOCOL_INCLUDE_DIR}")
 
 # ---------- ota_core: 화면(QWidget/QMainWindow) + Qt 전체와 무관한 순수 로직 ----------
-# core/      BIN 분할 (ota-protocol의 공유 헤더로 패킷 직렬화)
-# transport/ ITransport 추상화 + CC1101 구현체(사용자 공간 래퍼)
+# core/      BIN 분할 (ota-protocol의 공유 헤더로 패킷 직렬화) — 순수 데이터 변환, I/O 없음
+# transport/ ITransport 추상화 + CC1101 구현체(사용자 공간 래퍼) — I/O 담당
+# session/   core/·transport/를 엮어서 실제 "전송 흐름"을 만드는 조율(orchestration) 계층.
+#            지금은 simplesender(ACK 없는 단순 전송)뿐이지만, 다음 단계 OtaSession
+#            (FSM, ACK/재전송)도 이 폴더에 들어갈 예정 — core/에 안 둔 이유는
+#            core/가 "순수 변환 로직" 전용 자리라는 정의를 유지하고 싶어서
+#            (docs/note/design-notes-gateway-ota-es.md 14절 참고)
 #
-# core/·transport/ 전부 std::string/std::vector 등 표준 C++만 쓰고 Qt 타입을
+# core/·transport/·session/ 전부 std::string/std::vector 등 표준 C++만 쓰고 Qt 타입을
 # 의도적으로 안 씁니다 — 그래서 ota_core는 Qt를 전혀 링크하지 않습니다.
 # (ota-protocol처럼 g++/clang++만으로도 빌드·테스트 가능하게 하려는 목적,
 # docs/note/design-notes-gateway-ota-es.md 참고)
@@ -45,6 +50,10 @@ message(STATUS "ota-protocol include: ${OTA_PROTOCOL_INCLUDE_DIR}")
 add_library(ota_core STATIC
     core/binsplitter.h
     core/binsplitter.cpp
+    session/simplesender.h
+    session/simplesender.cpp
+    session/simplereceiver.h
+    session/simplereceiver.cpp
     transport/itransport.h
     transport/cc1101_status.h
     transport/cc1101transport.h
@@ -55,6 +64,7 @@ target_include_directories(ota_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/core
     ${CMAKE_CURRENT_SOURCE_DIR}/transport
+    ${CMAKE_CURRENT_SOURCE_DIR}/session
     ${OTA_PROTOCOL_INCLUDE_DIR}
 )
 
@@ -100,3 +110,61 @@ target_link_libraries(ota_core_tests
         ota_core
 )
 add_test(NAME ota_core_tests COMMAND ota_core_tests)
+
+# ---------- ota_smoke_send / ota_smoke_recv: 실기기(CC1101) 스모크테스트용 CLI ----------
+# /dev/cc1101이 실제로 있어야 동작하는 수동 실행 도구라서 add_test()에는 등록하지
+# 않음 — ctest(자동 빌드 검증)에는 안 끼고, 실기기 앞에서 사람이 직접 실행.
+add_executable(ota_smoke_send
+    tests/smoke_send_main.cpp
+)
+target_link_libraries(ota_smoke_send
+    PRIVATE
+        ota_core
+)
+
+add_executable(ota_smoke_recv
+    tests/smoke_recv_main.cpp
+)
+target_link_libraries(ota_smoke_recv
+    PRIVATE
+        ota_core
+)
+
+# ---------- tools/spidev: 진단 도구 (제품 코드 아님) ----------
+# SpidevTransport는 커널 드라이버(/dev/cc1101)를 우회해서 /dev/spidevX.Y로 CC1101을
+# 직접 폴링하는 ITransport 구현체입니다. "안 되는 원인이 하드웨어냐 커널이냐"를
+# 가르는 통제 실험(control experiment) 용도이며, 정식 전송 경로가 아닙니다.
+#
+# **의도적으로 ota_core에 넣지 않았습니다.** ota_core는 GUI 앱(OTA_System)과
+# 유닛테스트가 함께 링크하는 제품 라이브러리인데, 앱이 절대 쓰지 않는 진단
+# 코드를 거기 넣으면 "제품에 포함된 코드"처럼 보이고 나중에 지우기도 어려워집니다.
+# 그래서 아래 두 실행파일이 spidevtransport.cpp를 직접 컴파일합니다 —
+# 이 폴더를 삭제하고 이 블록만 지우면 깔끔하게 제거됩니다.
+#
+# 존재 이유·사용 시점·삭제 조건은 tools/spidev/README.md 참고.
+# 실기기 전용 수동 도구라 add_test()에는 등록하지 않습니다.
+add_executable(ota_smoke_spidev_send
+    tools/spidev/smoke_spidev_send_main.cpp
+    tools/spidev/spidevtransport.cpp
+)
+target_link_libraries(ota_smoke_spidev_send
+    PRIVATE
+        ota_core
+)
+target_include_directories(ota_smoke_spidev_send
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/spidev
+)
+
+add_executable(ota_smoke_spidev_recv
+    tools/spidev/smoke_spidev_recv_main.cpp
+    tools/spidev/spidevtransport.cpp
+)
+target_link_libraries(ota_smoke_spidev_recv
+    PRIVATE
+        ota_core
+)
+target_include_directories(ota_smoke_spidev_recv
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/spidev
+)
