@@ -53,9 +53,9 @@
 | `transport/cc1101_ioctl.h`, `cc1101_status.h` | 커널 드라이버와 공유하는 계약 헤더(ioctl 번호·구조체), 상태값 타입 | 완료 |
 | `session/simplesender.h/.cpp` | `simpleSendFile()`(ACK 없이 순서대로 쏘기만 함) + `performHandshake()`(START 보내고 ACK 올 때까지 재시도) + `sendDataAndEnd()` | 완료 |
 | `session/simplereceiver.h/.cpp` | `tryReceiveOnce()`(패킷 하나 받아서 종류 구분) + `sendAckFor()`(받으면 반사적으로 ACK 응답, 재전송 판단은 안 함) | 완료 |
-| `session/otasession.h/.cpp` | **`OtaSession`(FSM)** — 배치(윈도우) 단위 ACK + 누락분만 선택적 재전송(Selective-Repeat), 핸드셰이크/END까지 상태로 관리. `docs/fsm-design.md` §6 알고리즘 구현체 | 유닛테스트 7개 통과. **실기기 검증 완료(1067/1067, sha256 일치, 드라이버 우회책 없이도 성공, 2026-08-19, 3절 참고).** 화면 미연결·`DISCOVER` 미포함·전송 효율 개선 여지 남음 |
+| `session/otasession.h/.cpp` | **`OtaSession`(FSM)** — 배치(윈도우) 단위 ACK + 누락분만 선택적 재전송(Selective-Repeat), 핸드셰이크/END까지 상태로 관리. `docs/fsm-design.md` §6 알고리즘 구현체 | 유닛테스트 8개 통과. **실기기 검증 완료(1067/1067, sha256 일치, 드라이버 우회책 없이도 성공, 전송 효율 개선까지 완료 — 중복 수신 1063→5개, 2026-08-19, 3절 참고).** 화면 미연결·`DISCOVER` 미포함 |
 | `tests/tst_binsplitter.cpp` | `BinSplitter` 자동 유닛테스트 (ctest 등록됨) | 완료 |
-| `tests/tst_otasession.cpp` | `OtaSession` 자동 유닛테스트 — `FakeTransport`(인메모리)로 핸드셰이크/배치ACK/NACK재전송/타임아웃/재시도초과/END NACK/일시정지 시나리오 검증 (ctest 등록됨) | 완료, 7개 케이스 통과 |
+| `tests/tst_otasession.cpp` | `OtaSession` 자동 유닛테스트 — `FakeTransport`(인메모리)로 핸드셰이크/배치ACK/NACK재전송/타임아웃/재시도초과/END NACK/일시정지/배치전송중폴링 시나리오 검증 (ctest 등록됨) | 완료, 8개 케이스 통과 |
 | `tests/smoke_send_main.cpp`, `smoke_recv_main.cpp` | `Cc1101Transport` 기반 실기기 수동 테스트 CLI (ctest 미등록) — 단순 전송(ACK 안 기다림) 경로 | **실기기 검증 완료.** `smoke_recv`는 2번째 인자로 받은 파일 재조립까지 지원 |
 | `tests/smoke_session_send_main.cpp` | `Cc1101Transport` + **`OtaSession`** 기반 실기기 송신 CLI (ctest 미등록). 수신측은 별도 프로그램 없이 기존 `ota_smoke_recv`를 그대로 씀 | 실기기 검증 완료 (1067/1067, sha256 일치, 드라이버 우회책 없이도 성공, 2026-08-19) |
 | `tools/spidev/` (폴더 전체) | **[진단 도구, 제품 코드 아님]** 커널 계층을 우회해 `/dev/spidevX.Y`로 CC1101을 직접 폴링 — "원인이 하드웨어냐 커널이냐"를 가르는 통제 실험용. `ota_core`에 안 들어감 | 유지 (삭제 조건은 `tools/spidev/README.md`) |
@@ -140,7 +140,7 @@
       1067청크 규모에서 돌린 것이기도 함 — 대용량에서도 SHA256 계산·전달·
       (수신측 자동 검증) 경로가 정상 동작함을 같이 확인.
 
-      **남은 비효율 → 원인 규명 + 수정 완료 (2026-08-19, 실기기 재검증 대기중)**:
+      **남은 비효율 → 원인 규명 + 수정 + 실기기 재검증 완료 (2026-08-19)**:
       중복 수신이 1062~1063개(청크 1067개 대비, 사실상 전 청크를 두 번씩
       보내는 수준)였던 원인을 찾음 — `enterSendingBatch()`가 배치 안 청크를
       다 보낼 때까지(최대 (batchSize-1)*chunkDelayMs ≈ 160ms) `recv()`를
@@ -151,8 +151,11 @@
       5ms 단위로 쪼개 그 사이사이 폴링하도록 수정(`30b2b3f`) — 새 유닛테스트
       (`batchSendingPollsAlreadyArrivedAckDuringSend`)로 수정 전 코드에서는
       실제로 실패함을 확인한 뒤 수정, 기존 유닛테스트 8개 회귀 없음.
-      **실기기(1067청크)로 중복 수신이 실제로 줄었는지는 아직 재검증 안 함**
-      — 다음 스모크테스트에서 확인 필요.
+
+      **✅ 실기기 재검증(1067청크) — 중복 수신 1063개 → 5개로 급감**
+      (99.5%↓), 1067/1067·누락 0·sha256 완전 일치는 그대로 유지. 가설이
+      맞았음을 실측으로 확인 — 남은 5개는 half-duplex 특성상 발생하는
+      정상 범위의 잔여 케이스로 판단(선택적 재전송이 그대로 커버).
 - [ ] **NACK 경로는 여전히 시뮬레이션으로만 검증됨.**
       `simplereceiver.cpp`의 `sendAckFor()`가 NACK을 실제로 보내지 않아서
       (항상 `OTA_PKT_ACK`만 생성), 실제 CRC 오류 상황에서 어떻게 동작할지는
