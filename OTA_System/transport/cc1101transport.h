@@ -36,11 +36,14 @@ public:
 
     bool send(const std::vector<uint8_t> &data) override;
     std::vector<uint8_t> recv() override;
+    // [2026-08-19] ITransport::flushRx() 구현 — 반환값 없이 override해야 해서
+    // (ITransport는 하드웨어 특정 타입인 Cc1101Status를 몰라야 함) void로 바꿈.
+    // 성공/실패는 기존처럼 lastStatus()로 확인 가능(m_lastStatus는 그대로 갱신함).
+    void flushRx() override;
 
     // cc1101-radio-api.md 5절 공통 API 대응 (라디오 API 담당 영역 — 팀원 4·5 드라이버가 실제 처리)
     Cc1101Status setChannel(uint8_t channel);
     Cc1101Status startRx();
-    Cc1101Status flushRx();
     Cc1101Status flushTx();
 
     // 마지막 recv() 성공 시 RSSI/LQI/CRC/수신시각 (cc1101-radio-api.md 4절)

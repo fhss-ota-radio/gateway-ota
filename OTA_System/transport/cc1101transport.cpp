@@ -206,15 +206,19 @@ Cc1101Status Cc1101Transport::startRx()
     return m_lastStatus = Cc1101Status::Ok;
 }
 
-Cc1101Status Cc1101Transport::flushRx()
+void Cc1101Transport::flushRx()
 {
-    if (m_fd < 0)
-        return m_lastStatus = Cc1101Status::NotInitialized;
+    if (m_fd < 0) {
+        m_lastStatus = Cc1101Status::NotInitialized;
+        return;
+    }
 
-    if (::ioctl(m_fd, CC1101_IOC_FLUSH_RX) < 0)
-        return m_lastStatus = statusFromErrno(errno);
+    if (::ioctl(m_fd, CC1101_IOC_FLUSH_RX) < 0) {
+        m_lastStatus = statusFromErrno(errno);
+        return;
+    }
 
-    return m_lastStatus = Cc1101Status::Ok;
+    m_lastStatus = Cc1101Status::Ok;
 }
 
 Cc1101Status Cc1101Transport::flushTx()
@@ -276,9 +280,9 @@ Cc1101Status Cc1101Transport::startRx()
     return m_lastStatus = Cc1101Status::NotInitialized;
 }
 
-Cc1101Status Cc1101Transport::flushRx()
+void Cc1101Transport::flushRx()
 {
-    return m_lastStatus = Cc1101Status::NotInitialized;
+    m_lastStatus = Cc1101Status::NotInitialized;
 }
 
 Cc1101Status Cc1101Transport::flushTx()
