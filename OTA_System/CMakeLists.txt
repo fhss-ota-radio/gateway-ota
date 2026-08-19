@@ -145,6 +145,18 @@ target_link_libraries(ota_smoke_recv
         ota_core
 )
 
+# OtaSession(FSM, 배치 ACK+선택적 재전송) 기반 송신 CLI — ota_smoke_send와
+# 하는 일은 같지만 안쪽 로직이 session/otasession.h를 씀. 수신측은 별도
+# 프로그램 없이 기존 ota_smoke_recv를 그대로 씀(이미 청크마다 개별 ACK를
+# 반사적으로 보내고 있어서 OtaSession이 기대하는 응답과 맞음).
+add_executable(ota_smoke_session_send
+    tests/smoke_session_send_main.cpp
+)
+target_link_libraries(ota_smoke_session_send
+    PRIVATE
+        ota_core
+)
+
 # ---------- tools/spidev: 진단 도구 (제품 코드 아님) ----------
 # SpidevTransport는 커널 드라이버(/dev/cc1101)를 우회해서 /dev/spidevX.Y로 CC1101을
 # 직접 폴링하는 ITransport 구현체입니다. "안 되는 원인이 하드웨어냐 커널이냐"를
