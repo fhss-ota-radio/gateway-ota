@@ -53,10 +53,11 @@
 | `transport/cc1101_ioctl.h`, `cc1101_status.h` | 커널 드라이버와 공유하는 계약 헤더(ioctl 번호·구조체), 상태값 타입 | 완료 |
 | `session/simplesender.h/.cpp` | `simpleSendFile()`(ACK 없이 순서대로 쏘기만 함) + `performHandshake()`(START 보내고 ACK 올 때까지 재시도) + `sendDataAndEnd()` | 완료 |
 | `session/simplereceiver.h/.cpp` | `tryReceiveOnce()`(패킷 하나 받아서 종류 구분) + `sendAckFor()`(받으면 반사적으로 ACK 응답, 재전송 판단은 안 함) | 완료 |
-| `session/otasession.h/.cpp` | **`OtaSession`(FSM)** — 배치(윈도우) 단위 ACK + 누락분만 선택적 재전송(Selective-Repeat), 핸드셰이크/END까지 상태로 관리. `docs/fsm-design.md` §6 알고리즘 구현체 | **구현 완료(2026-08-18), 유닛테스트 7개 통과.** 실기기 미검증·화면 미연결·`DISCOVER` 미포함(아래 3절 참고) |
+| `session/otasession.h/.cpp` | **`OtaSession`(FSM)** — 배치(윈도우) 단위 ACK + 누락분만 선택적 재전송(Selective-Repeat), 핸드셰이크/END까지 상태로 관리. `docs/fsm-design.md` §6 알고리즘 구현체 | **완료 — 유닛테스트 7개 + 실기기 검증 통과(1067/1067, sha256 일치, 2026-08-19).** 화면 미연결·`DISCOVER` 미포함(아래 3절 참고) |
 | `tests/tst_binsplitter.cpp` | `BinSplitter` 자동 유닛테스트 (ctest 등록됨) | 완료 |
 | `tests/tst_otasession.cpp` | `OtaSession` 자동 유닛테스트 — `FakeTransport`(인메모리)로 핸드셰이크/배치ACK/NACK재전송/타임아웃/재시도초과/END NACK/일시정지 시나리오 검증 (ctest 등록됨) | 완료, 7개 케이스 통과 |
-| `tests/smoke_send_main.cpp`, `smoke_recv_main.cpp` | `Cc1101Transport` 기반 실기기 수동 테스트 CLI (ctest 미등록) | **실기기 검증 완료.** `smoke_recv`는 2번째 인자로 받은 파일 재조립까지 지원(무결성 검증은 미실행) |
+| `tests/smoke_send_main.cpp`, `smoke_recv_main.cpp` | `Cc1101Transport` 기반 실기기 수동 테스트 CLI (ctest 미등록) — 단순 전송(ACK 안 기다림) 경로 | **실기기 검증 완료.** `smoke_recv`는 2번째 인자로 받은 파일 재조립까지 지원 |
+| `tests/smoke_session_send_main.cpp` | `Cc1101Transport` + **`OtaSession`** 기반 실기기 송신 CLI (ctest 미등록). 수신측은 별도 프로그램 없이 기존 `ota_smoke_recv`를 그대로 씀 | **실기기 검증 완료 (1067/1067, sha256 일치, 2026-08-19)** |
 | `tools/spidev/` (폴더 전체) | **[진단 도구, 제품 코드 아님]** 커널 계층을 우회해 `/dev/spidevX.Y`로 CC1101을 직접 폴링 — "원인이 하드웨어냐 커널이냐"를 가르는 통제 실험용. `ota_core`에 안 들어감 | 유지 (삭제 조건은 `tools/spidev/README.md`) |
 
 > `session/simplesender.h/.cpp`에 핸드셰이크 로직을 처음엔 별도
@@ -111,16 +112,43 @@
       `simplesender`/`simplereceiver`의 START/END 인코딩·`tryReceiveOnce()`를
       그대로 재사용하고, 그 위에 배치 루프·타이머·재시도 카운터를 얹음.
       `tick(nowMs)`를 주기 호출하는 구조라 Qt `QTimer`로 그대로 감쌀 수 있음
-- [ ] **실기기(라즈베리파이 2대) 검증 — 미착수.** 지금까지는
-      `FakeTransport`(인메모리)로 로직만 검증했습니다(유닛테스트 7개, 아래 표).
-      NACK 경로는 특히 주의: `simplereceiver.cpp`의 `sendAckFor()`가 현재
-      NACK을 실제로 보내지 않아서(항상 `OTA_PKT_ACK`만 생성), 이 부분은
-      아직 시뮬레이션으로만 검증됐고 실제 CRC 오류 상황에서 어떻게
-      동작할지는 리시버 쪽에 NACK 발신 로직을 추가해야 실기기로 확인 가능
+- [x] **실기기(라즈베리파이 2대) 검증 — 완료 (2026-08-19).**
+      `tests/smoke_session_send_main.cpp`(신규 CLI)로 송신측에서 `OtaSession`을
+      돌리고 기존 `ota_smoke_recv`를 수신측에 띄워 검증했습니다.
+      **1067/1067 청크, 누락 0, sha256 완전 일치**
+      (`f81809e47585b4996788be95c99ffc2c12cea2f00a3205bc483ab8ba6e932f0a`).
+      이 과정에서 찾은 실기기 전용 버그는 아래 "재전송 버스트" 항목 참고.
+- [ ] **NACK 경로는 여전히 시뮬레이션으로만 검증됨.**
+      `simplereceiver.cpp`의 `sendAckFor()`가 NACK을 실제로 보내지 않아서
+      (항상 `OTA_PKT_ACK`만 생성), 실제 CRC 오류 상황에서 어떻게 동작할지는
+      리시버 쪽에 NACK 발신 로직을 추가해야 실기기로 확인 가능
 - [ ] `DISCOVER`/`DISCOVER_ACK` 기반 기기 탐색 흐름 — 프로토콜 레벨 타입/인코딩은
       `ota-protocol`에 이미 있음, `gateway-ota` 쪽 사용 로직은 미착수.
       `OtaSession`은 의도적으로 이 부분을 포함하지 않음(아래 참고)
 - [ ] `otamanager.cpp`(화면)에 실제 전송 로직 연결 — 미착수
+
+#### 실기기 검증에서 찾은 버그 — 재전송 버스트 (2026-08-19 수정)
+
+유닛테스트(`FakeTransport`)는 전부 통과하는데 실기기에서만 "배치 재전송
+한도(5회) 초과"로 죽는 문제가 있었습니다. 원인은 `tickWaitingBatchAck()`이
+**타임아웃된 슬롯 전부를 한 틱에 연달아 재전송**한 것이었습니다
+(`retransmitSlot()`에 `chunkDelayMs` 간격도 없었음).
+
+CC1101은 **반이중(half-duplex, 송신 중에는 수신 불가)**이라, 그 연속 송신
+구간 동안 수신측이 보낸 ACK가 전부 송신측 귀에 안 들어옵니다. 그러면 다음
+타임아웃에 또 몰아 쏘고 또 못 듣는 악순환이 되어 재시도 한도를 넘깁니다.
+결정적 단서는 **수신측 로그에 해당 seq를 정상 수신하고 ACK를 보낸 기록이
+남아 있는데 송신측만 실패**한 것이었습니다.
+
+`FakeTransport`는 인메모리라 송수신이 동시에 가능해서 이 문제가 드러나지
+않았습니다 — **반이중 특성은 실기기에서만 재현되는 종류의 버그**입니다.
+
+수정: 한 틱에 하나만 재전송(`break`) + 재전송에도 `chunkDelayMs` 적용.
+
+> **남은 개선 여지**: 검증 성공 회차의 중복 수신이 1063개(청크 1067개 대비)로,
+> 사실상 전 청크를 두 번씩 보낸 셈입니다. 정확성엔 문제없지만 전송 효율은
+> 절반 수준 — 배치 전송 중에 돌아오는 ACK를 못 듣는 구조라서 생깁니다.
+> 배치 크기·`chunkDelayMs`·타임아웃 조정으로 개선 여지가 있습니다.
 
 > **`OtaSession`이 `docs/fsm-design.md` 전체 상태표를 구현하지는 않습니다.**
 > `DISCONNECTED`/`CONNECTED_IDLE`/`FILE_READY`/`DISCOVERING`/`SELECTING`은
@@ -185,6 +213,8 @@ cmp -l test.bin recv.bin | awk '{print int(($1-1)/48)}' | sort -n | uniq -c
 | 2026-08-16 | 1067/1067 | **운이 좋았던 것으로 판단** |
 | 2026-08-17 1차 | 811/1067 | 순간 간섭 |
 | 2026-08-17 2차 | 1059/1067 | 8개 손실 |
+| 2026-08-18 1차 (욕토 환경) | 1067/1067 | `RXFIFO_OVERFLOW` 드라이버 버그 수정 후, **sha256 완전 일치** |
+| 2026-08-18 2차 (욕토 환경) | 1067/1067 | 재현 확인, **sha256 완전 일치** |
 
 → **새 게이트: "손실된 청크를 제외한 전 구간이 원본과 바이트 단위로 일치"**
 이건 소프트웨어가 통제할 수 있는 조건이고, 실제로 검증하려던 것이기도
@@ -218,12 +248,35 @@ cmp -l test.bin recv.bin | awk '{print int(($1-1)/48)}' | sort -n | uniq -c
 | 인터럽트 7,700만 회 폭주 | 커널 | 송신 완료 후 명시적 `SRX` 복원 |
 | 하드웨어 주소필터가 패킷 폐기 | 칩 설정 | `PKTCTRL1`의 `ADR_CHK` 끔 (`0x0D`→`0x0C`) |
 | 커널 헤더/소스 못 구해 모듈 적재 실패 | 인프라 | 빌드서버(10.10.16.54)에서 크로스컴파일로 해결 |
+| `MARCSTATE`가 `RXFIFO_OVERFLOW`에서 안 풀림 (2026-08-18) | 커널 | `SET_RX`가 `SFRX`(FIFO flush) 없이 재진입만 함 — 담당자가 드라이버 수정, 실기기로 수정 확인 |
 
 > **커널 드라이버(`kernel-cc1101-spi`)는 팀원3·4 담당 레포입니다.**
 > 검증 과정에서 부득이 8군데를 고쳤고, 그 내역과 담당자 판단이 필요한 항목을
 > `kernel-cc1101-spi/docs/driver-changes-handoff-2026-08-17.md`에 정리했습니다.
 > **직접 머지하지 않고 PR로 리뷰 요청할 것** — 특히 임시 디버그 로그
 > (`dev_warn`) 원복은 담당자 판단 사항입니다.
+
+### 욕토 환경 재검증 (2026-08-18) — `RXFIFO_OVERFLOW` 버그 수정 후 ✅
+
+팀에서 새로 준비한 욕토(Yocto) 이미지 라즈베리파이 2대로 재검증하다가,
+수신측 칩이 `MARCSTATE=0x11(RXFIFO_OVERFLOW)`에서 안 풀리는 별도의 드라이버
+버그를 발견했습니다(위 표 마지막 행). `CC1101_IOC_SET_RX`가 FIFO를 안 비우고
+재진입만 해서, 한번 오버플로에 빠지면 `ota_smoke_recv`를 몇 번을 재시작해도
+안 풀리는 증상이었습니다. 드라이버 담당자께 리포트했고, 수정된 `cc1101.ko`를
+받아 재검증했습니다.
+
+| 항목 | 결과 |
+|---|---|
+| 1차 전송 | 1067/1067, 중복 0, **sha256 완전 일치** |
+| 2차 전송(재현 확인) | 1067/1067, 중복 0, **sha256 완전 일치** |
+
+**08-17 측정(99.25%)보다 나은 결과가 나온 이유**: 그때 손실의 일부(전부는
+아닐 수 있음)가 사실 이 `RXFIFO_OVERFLOW` 복구 실패 때문이었을 가능성이
+있습니다. 다만 **이게 "재전송이 이제 필요 없다"는 뜻은 아닙니다** — 이건
+특정 버그 하나를 없앤 것이고, 무선 채널 자체의 순간 손실(간섭, 페이딩)은
+여전히 존재하는 별개의 문제입니다. 마일스톤 4의 재전송은 그대로 필요합니다.
+자세한 경위는 `docs/note/design-notes-gateway-ota-es.md` 25절,
+`kernel-cc1101-spi/docs/troubleshooting-cc1101.md` 1-3-1절 참고.
 
 ---
 
@@ -239,10 +292,12 @@ cmp -l test.bin recv.bin | awk '{print int(($1-1)/48)}' | sort -n | uniq -c
 3. ~~배치 ACK + 누락분 재전송 설계·구현~~ **완료 (2026-08-18)** —
    `session/otasession.h/.cpp`, 유닛테스트 `tests/tst_otasession.cpp`
 4. ~~`simplesender`/`simplereceiver`를 `OtaSession`(FSM)으로 통합~~ **완료 (2026-08-18)**
-5. **`OtaSession`을 실기기(라즈베리파이 2대)로 검증** — 지금까지는
-   `FakeTransport`로 로직만 확인. 특히 배치 크기(5)·타임아웃(300ms)이 실제
-   RF 손실 패턴(2026-08-17 측정: 최대 7개 연속 손실)에 맞는지 확인 필요 —
-   `docs/note/design-notes-gateway-ota-es.md` 23절
+5. ~~**`OtaSession`을 실기기(라즈베리파이 2대)로 검증**~~ **완료 (2026-08-19)** —
+   1067/1067, sha256 일치. `tests/smoke_session_send_main.cpp` 추가.
+   이 과정에서 반이중 특성 때문에 생기는 "재전송 버스트" 버그를 찾아 수정함
+   (3절 참고). 다만 **전송 효율은 개선 여지 있음** — 중복 수신 1063개로
+   사실상 전 청크를 두 번씩 보냄. 배치 크기(5)·`chunkDelayMs`(40)·
+   타임아웃(300ms) 조합 재조정이 다음 후보
 6. `otamanager.cpp`(화면)에 실제 전송 로직 연결 — `OtaSession::tick()`을
    Qt `QTimer`로 주기 호출, `setOnStateChanged()`로 진행률바·로그 갱신
 
