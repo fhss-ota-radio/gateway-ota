@@ -128,6 +128,18 @@ target_link_libraries(ota_session_tests
 )
 add_test(NAME ota_session_tests COMMAND ota_session_tests)
 
+# ---------- ota_receiver_tests: sendAckFor()/peekDataHeaderForNack() 검증 ----------
+# 2026-08-19 발견: sendAckFor()가 resultCode와 무관하게 항상 OTA_PKT_ACK로만
+# 인코딩하던 버그(NACK이 와이어에 한 번도 안 나갔음)의 회귀 테스트.
+add_executable(ota_receiver_tests
+    tests/tst_simplereceiver.cpp
+)
+target_link_libraries(ota_receiver_tests
+    PRIVATE
+        ota_core
+)
+add_test(NAME ota_receiver_tests COMMAND ota_receiver_tests)
+
 # ---------- ota_smoke_send / ota_smoke_recv: 실기기(CC1101) 스모크테스트용 CLI ----------
 # /dev/cc1101이 실제로 있어야 동작하는 수동 실행 도구라서 add_test()에는 등록하지
 # 않음 — ctest(자동 빌드 검증)에는 안 끼고, 실기기 앞에서 사람이 직접 실행.
@@ -155,6 +167,18 @@ add_executable(ota_smoke_session_send
     tests/smoke_session_send_main.cpp
 )
 target_link_libraries(ota_smoke_session_send
+    PRIVATE
+        ota_core
+)
+
+# session/simplereceiver.h의 sendAckFor()가 실제로 NACK을 만들어 보내는지
+# 실기기(CC1101)로 확인하는 전용 도구 — 일부러 CRC를 깨뜨리거나 범위 밖
+# sequence로 DATA를 보내서, ota_smoke_recv가 진짜 NACK을 돌려주는지 본다.
+# 자세한 이유는 tests/smoke_bad_data_main.cpp 상단 주석 참고.
+add_executable(ota_smoke_bad_data
+    tests/smoke_bad_data_main.cpp
+)
+target_link_libraries(ota_smoke_bad_data
     PRIVATE
         ota_core
 )

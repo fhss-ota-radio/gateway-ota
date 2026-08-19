@@ -66,4 +66,14 @@ ReceivedPacket tryReceiveOnce(ITransport &transport);
 bool sendAckFor(ITransport &transport, const ReceivedPacket &packet,
                  uint8_t resultCode = 0 /* OTA_RESULT_OK */);
 
+// OTA_DATA 패킷의 헤더(session_id, sequence)만 다시 읽는다. 정상 decode
+// 경로(tryReceiveOnce)와 달리 CRC 검증을 하지 않으므로, CRC가 깨진 DATA도
+// "어떤 세션의 몇 번 청크였는지"는 알아낼 수 있다 — CRC 오류 NACK을 보낼 때
+// 이 정보가 필요하다(안 그러면 그냥 버리는 것과 재전송 유도를 구분할 수 없음).
+//
+// raw가 OTA_DATA 타입이 아니거나 헤더 길이(OTA_DATA_HEADER_SIZE)보다 짧으면
+// false — 그 경우 sessionId/sequence는 건드리지 않는다.
+bool peekDataHeaderForNack(const std::vector<uint8_t> &raw, uint32_t *sessionId,
+                            uint32_t *sequence);
+
 #endif // SIMPLERECEIVER_H

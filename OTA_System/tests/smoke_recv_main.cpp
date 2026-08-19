@@ -105,6 +105,9 @@ int main(int argc, char *argv[])
     uint32_t writtenChunks = 0;
     uint32_t duplicateChunks = 0;
     uint8_t expectedSha256[32] = {}; // START에 실려온 값 — END에서 재계산해 비교
+    uint32_t currentSessionId = 0;   // START에서 저장 — CRC 오류 NACK을 지금
+                                      // 진행 중인 세션에 대해서만 보내기 위함
+                                      // (엉뚱한 노이즈까지 NACK 보내지 않게)
 
     Cc1101Transport transport(devicePath);
     if (!transport.open()) {
@@ -130,15 +133,45 @@ int main(int argc, char *argv[])
 
         // 뭔가 왔는데 디코딩은 실패함 (길이 이상, CRC 불일치 등)
         if (packet.kind == ReceivedPacketKind::Unknown) {
-            std::cout << "[smoke_recv] 디코딩 실패 (" << packet.raw.size() << "byte): ";
-            printHex(packet.raw);
+            // [추가 2026-08-19] 지금까지는 여기서 그냥 화면에 찍고 버렸다 —
+            // "NACK 경로는 시뮬레이션으로만 검증됨"(docs/roadmap.md)의 원인
+            // 중 하나. ota_protocol_decode_data()는 CRC가 안 맞으면 통째로
+            // 실패해서 어떤 청크였는지조차 모르지만, 헤더 자체는 CRC 검사
+            // 대상이 아니므로(session/simplereceiver.h peekDataHeaderForNack
+            // 주석 참고) 그 청크 번호는 여전히 알아낼 수 있다. 알아낼 수
+            // 있으면 NACK을 보내 즉시 재전송을 유도하고, 알 수 없으면(DATA도
+            // 아니거나 헤더 자체가 깨졌으면) 예전처럼 그냥 버린다(송신측이
+            // 타임아웃으로 알아서 재전송함).
+            uint32_t badSessionId = 0, badSequence = 0;
+            if (peekDataHeaderForNack(packet.raw, &badSessionId, &badSequence)
+                && badSessionId == currentSessionId) {
+                std::cout << "[smoke_recv] OTA_DATA CRC 오류 감지 session=0x" << std::hex
+                           << badSessionId << std::dec << " seq=" << badSequence
+                           << " (" << packet.raw.size() << "byte)\n";
+                ReceivedPacket crcFailPacket;
+                crcFailPacket.kind = ReceivedPacketKind::Data;
+                crcFailPacket.sessionId = badSessionId;
+                crcFailPacket.sequence = badSequence;
+                const bool nacked =
+                    sendAckFor(transport, crcFailPacket, static_cast<uint8_t>(OTA_RESULT_INVALID_CRC));
+                std::cout << "[smoke_recv]   -> NACK(CRC 오류) " << (nacked ? "전송함" : "전송 실패") << "\n";
+            } else {
+                std::cout << "[smoke_recv] 디코딩 실패 (" << packet.raw.size() << "byte): ";
+                printHex(packet.raw);
+            }
             continue;
         }
+
+        // 이번 패킷 처리 중 seq 범위 초과 같은 "받았지만 유효하지 않음"이
+        // 감지되면 true로 바뀜 — 맨 아래 응답 전송 분기에서 ACK 대신 NACK을
+        // 보내는 데 씀. Data 케이스가 아니면 항상 false로 유지됨.
+        bool sequenceOutOfRange = false;
 
         switch (packet.kind) {
         case ReceivedPacketKind::Start:
             dataCount = 0;
             totalChunksHint = packet.totalChunks;
+            currentSessionId = packet.sessionId;
             std::cout << "[smoke_recv] " << kindToString(packet.kind)
                        << " session=0x" << std::hex << packet.sessionId << std::dec
                        << " target=0x" << std::hex << packet.targetDeviceId << std::dec
@@ -204,9 +237,16 @@ int main(int argc, char *argv[])
                         packet.payloadLength);
                     outFile.flush();
                 } else {
+                    // [수정 2026-08-19] 예전에는 여기서 로그만 찍고 아래
+                    // 공용 응답 분기에서 무조건 ACK을 보냈다 — 저장은
+                    // 안 했으면서 성공했다고 답한 셈이라 송신측이 이 청크를
+                    // 다시는 재전송할 기회가 없었다(ACK을 받았으니 끝난
+                    // 줄 앎). sequenceOutOfRange를 세워서 NACK
+                    // (OTA_RESULT_INVALID_SEQUENCE)이 나가도록 고침.
                     std::cerr << "[smoke_recv]   ! seq=" << packet.sequence
                               << " 가 totalChunks(" << expectedChunks
-                              << ") 범위를 넘음 - 저장 생략\n";
+                              << ") 범위를 넘음 - 저장 생략, NACK 보냄\n";
+                    sequenceOutOfRange = true;
                 }
             }
             break;
@@ -278,13 +318,18 @@ int main(int argc, char *argv[])
             break;
         }
 
-        // Start/Data/End만 응답 대상 — 받았다는 확인(ACK)을 바로 돌려보냄.
-        // 재전송 판단·대기 없이 "이거 받았다"만 반사적으로 알려주는 것
-        // (session/simplereceiver.h의 sendAckFor 주석 참고).
+        // Start/Data/End만 응답 대상 — 받았다는 확인(ACK, 또는 이번에 감지된
+        // 오류가 있으면 NACK)을 바로 돌려보냄. 재전송 판단·대기 없이 "이거
+        // 받았다/못 받았다"만 반사적으로 알려주는 것 (session/
+        // simplereceiver.h의 sendAckFor 주석 참고).
         if (packet.kind == ReceivedPacketKind::Start || packet.kind == ReceivedPacketKind::Data
             || packet.kind == ReceivedPacketKind::End) {
-            const bool acked = sendAckFor(transport, packet);
-            std::cout << "[smoke_recv]   -> ACK " << (acked ? "전송함" : "전송 실패") << "\n";
+            const uint8_t resultCode = sequenceOutOfRange
+                ? static_cast<uint8_t>(OTA_RESULT_INVALID_SEQUENCE)
+                : static_cast<uint8_t>(OTA_RESULT_OK);
+            const bool acked = sendAckFor(transport, packet, resultCode);
+            std::cout << "[smoke_recv]   -> " << (sequenceOutOfRange ? "NACK(순서 오류) " : "ACK ")
+                       << (acked ? "전송함" : "전송 실패") << "\n";
 
             // [우회책 2026-08-19 도입 → 2026-08-19 같은 날 제거하고 재검증]
             //
