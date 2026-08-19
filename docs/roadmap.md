@@ -156,7 +156,7 @@
       (99.5%↓), 1067/1067·누락 0·sha256 완전 일치는 그대로 유지. 가설이
       맞았음을 실측으로 확인 — 남은 5개는 half-duplex 특성상 발생하는
       정상 범위의 잔여 케이스로 판단(선택적 재전송이 그대로 커버).
-- [~] **NACK 경로 — 근본 원인 발견·수정 완료, 실기기 검증 대기중 (2026-08-19).**
+- [x] **NACK 경로 — 근본 원인 발견·수정·실기기 검증 완료 (2026-08-19).**
       `sendAckFor()`가 `resultCode`와 무관하게 항상 `OTA_PKT_ACK`로만
       인코딩하던 버그를 찾음(송신측 판정이 kind+resultCode를 같이 봐서
       동작 자체는 어쩌다 맞았지만, 와이어에 진짜 `OTA_NACK` 타입이 한 번도
@@ -167,9 +167,15 @@
       `peekDataHeaderForNack()`도 추가해 CRC 깨진 DATA도 어떤 청크인지
       알아내 NACK을 보낼 수 있게 함. `smoke_recv_main.cpp`를 실제
       CRC 오류·범위 밖 sequence 상황에 연결(후자는 저장 안 하면서도 ACK를
-      보내던 기존 버그이기도 했음). 실기기 검증용 `tests/
-      smoke_bad_data_main.cpp` 추가(일부러 깨진 패킷을 보내는 전용 CLI) —
-      **아직 실기기로 안 돌려봄, 다음 스모크테스트에서 확인 필요.**
+      보내던 기존 버그이기도 했음).
+
+      **✅ 실기기 검증 (`tests/smoke_bad_data_main.cpp`)** — CRC를 일부러
+      깨뜨린 DATA(seq=0)와 범위 밖 sequence(seq=999)를 각각 보내서
+      `<- OTA_NACK session=... seq=0 result=INVALID_CRC`,
+      `<- OTA_NACK session=... seq=999 result=INVALID_SEQUENCE`를 실제로
+      수신 확인 — 수신측 로그에서도 `NACK(CRC 오류) 전송함`/`NACK(순서
+      오류) 전송함`이 그대로 찍힘. 와이어 레벨에서 ACK와 다른 진짜 NACK
+      타입 패킷이 왕복하는 것까지 실기기로 완전히 확인됨.
 - [ ] `DISCOVER`/`DISCOVER_ACK` 기반 기기 탐색 흐름 — 프로토콜 레벨 타입/인코딩은
       `ota-protocol`에 이미 있음, `gateway-ota` 쪽 사용 로직은 미착수.
       `OtaSession`은 의도적으로 이 부분을 포함하지 않음(아래 참고)
