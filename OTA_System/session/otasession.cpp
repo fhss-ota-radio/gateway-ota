@@ -1,6 +1,7 @@
 #include "otasession.h"
 
 #include "itransport.h"
+#include "sha256.h"          // sha256File() — image_sha256 필드 채우기용
 #include "simplereceiver.h" // tryReceiveOnce(), ReceivedPacketKind
 #include "simplesender.h"   // generateSessionId(), readFileSize()
 
@@ -80,6 +81,16 @@ bool OtaSession::start(const std::string &filePath, uint32_t targetDeviceId, uin
     if (!readFileSize(filePath, &imageSize, &m_errorMessage))
         return false;
 
+    // OTA_START에 실어 보낼 실제 SHA256을 여기서 미리 계산해 둠 (파일을 한 번
+    // 더 훑는 비용이 들지만, BinSplitter::split()도 어차피 파일 전체를 한 번
+    // 읽으므로 두 번째 순회가 크게 비싸진 않음). ESP32(firmware-esp32의
+    // ota_writer_finish())가 OTA_END에서 이 값을 진짜로 검증하기 때문에 0으로
+    // 채워 보내면 데이터 전송이 전부 성공해도 마지막에 항상 거절당한다
+    // (2026-08-19 발견, docs/roadmap.md 참고). 라즈베리파이끼리 테스트할 때는
+    // 수신측이 이 값을 안 보므로 이전처럼 문제없이 동작한다.
+    if (!sha256File(filePath, m_imageSha256, &m_errorMessage))
+        return false;
+
     const uint32_t effectiveSessionId = (sessionId == 0) ? generateSessionId() : sessionId;
 
     std::string splitError;
@@ -111,9 +122,12 @@ void OtaSession::sendStartPacket()
     fields.target_device_id = m_targetDeviceId;
     fields.image_size = m_imageSize;
     fields.total_chunks = static_cast<uint32_t>(m_chunks.size());
-    // image_sha256: 아직 계산 안 함 — simplesender.h와 같은 이유(수신측도 아직
-    // 검증 안 함). SHA256 무결성 검증은 별도 작업으로 남겨둠.
-    std::memset(fields.image_sha256, 0, sizeof(fields.image_sha256));
+    // start()에서 sha256File()로 미리 계산해 둔 실제 해시를 그대로 실어 보냄
+    // (ESP32 수신측 ota_writer_finish()가 OTA_END에서 이 값과 실제 수신된
+    // 이미지의 해시를 비교·검증함 — 위 start() 주석 참고).
+    static_assert(sizeof(fields.image_sha256) == sizeof(m_imageSha256),
+                  "ota_start_fields_t.image_sha256 크기가 Sha256 출력(32byte)과 다릅니다");
+    std::memcpy(fields.image_sha256, m_imageSha256, sizeof(fields.image_sha256));
 
     uint8_t packet[OTA_START_PACKET_SIZE];
     const size_t written = ota_protocol_encode_start(packet, sizeof(packet), &fields);

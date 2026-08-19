@@ -132,6 +132,7 @@ private:
     uint32_t m_targetDeviceId = 0;
     uint32_t m_sessionId = 0;
     uint32_t m_imageSize = 0;
+    uint8_t m_imageSha256[32] = {};   // start()에서 sha256File()로 채움 (core/sha256.h)
     std::vector<OtaChunk> m_chunks;   // BinSplitter 결과, 전체 청크
     uint32_t m_nextUnsentIndex = 0;   // m_chunks 기준 다음 배치가 시작할 인덱스
 

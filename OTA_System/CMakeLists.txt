@@ -50,6 +50,8 @@ message(STATUS "ota-protocol include: ${OTA_PROTOCOL_INCLUDE_DIR}")
 add_library(ota_core STATIC
     core/binsplitter.h
     core/binsplitter.cpp
+    core/sha256.h
+    core/sha256.cpp
     session/simplesender.h
     session/simplesender.cpp
     session/simplereceiver.h
