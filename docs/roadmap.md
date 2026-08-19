@@ -353,8 +353,14 @@ cmp -l test.bin recv.bin | awk '{print int(($1-1)/48)}' | sort -n | uniq -c
       55/56/57/63/64/65/119/120/128byte + 10만byte 파일까지 자체 테스트
       통과, 유닛테스트 7개 회귀 확인). `OtaSession::start()`가 파일을 읽는
       시점에 해시를 계산해 두고, `sendStartPacket()`에서 그대로 실어 보냄.
-      실기기(라즈베리파이-라즈베리파이) 재검증은 아직 안 함 — 다음 스모크
-      테스트에서 확인 필요.
+      **덧붙여 수신측(`ota_smoke_recv`)에도 자동 검증을 추가함** — 지금까지는
+      재조립(누락 0개) 확인 후 사람이 양쪽에서 `sha256sum`을 손으로 돌려
+      비교해야 했는데, `ReceivedPacket`에 `imageSha256` 필드를 추가해
+      START 값을 받아 두고, `OTA_END`에서 같은 `core/sha256.h`로 재조립된
+      파일의 해시를 직접 계산·비교해 일치/불일치를 자동 출력하도록 함
+      (ESP32의 `ota_writer_finish()`와 같은 절차를 Pi에서 미리 리허설하는
+      셈). 실기기(라즈베리파이-라즈베리파이) 재검증은 아직 안 함 — 다음
+      스모크테스트에서 확인 필요.
 - [ ] ESP32 `ota_batch_cache.h`의 `OTA_CLIENT_DATA_MAX_PAYLOAD_SIZE`(48)가
       공유 헤더 `ota_protocol.h`의 `OTA_MAX_PAYLOAD_SIZE`를 참조하지 않고
       독립된 매직넘버로 따로 정의돼 있음 — 지금 당장 문제는 아니지만 둘 중

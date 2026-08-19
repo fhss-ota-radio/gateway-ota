@@ -20,6 +20,7 @@
 //   종류와 필드를 콘솔에 출력합니다.
 
 #include "cc1101transport.h"
+#include "sha256.h"          // sha256File() — 재조립 결과 자동 검증용
 #include "simplereceiver.h"
 
 extern "C" {
@@ -28,8 +29,10 @@ extern "C" {
 
 #include <chrono>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <iostream>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -58,6 +61,16 @@ void printHex(const std::vector<uint8_t> &data)
     std::printf("\n");
 }
 
+// SHA256 32byte를 소문자 hex 문자열로 (sha256sum 출력 형식과 맞춤 — 눈으로
+// 비교할 때 바로 대조할 수 있게).
+std::string sha256ToHex(const uint8_t hash[32])
+{
+    char buf[65];
+    for (int i = 0; i < 32; ++i)
+        std::snprintf(buf + i * 2, 3, "%02x", hash[i]);
+    return std::string(buf, 64);
+}
+
 } // namespace
 
 int main(int argc, char *argv[])
@@ -68,9 +81,8 @@ int main(int argc, char *argv[])
                   << "      " << argv[0] << " /dev/cc1101 recv.bin\n"
                   << "\n"
                   << "  저장할_파일을 주면 받은 DATA를 sequence 순서대로 재조립해서\n"
-                  << "  그 파일에 씁니다. 원본과 같은지는 아래처럼 확인하세요:\n"
-                  << "    (송신측) sha256sum 원본.bin\n"
-                  << "    (수신측) sha256sum recv.bin\n";
+                  << "  그 파일에 씁니다. 재조립이 끝나면(누락 0개) OTA_START에 실려온\n"
+                  << "  SHA256과 직접 비교해서 일치 여부를 자동으로 출력합니다.\n";
         return 1;
     }
 
@@ -92,6 +104,7 @@ int main(int argc, char *argv[])
     uint32_t expectedChunks = 0;
     uint32_t writtenChunks = 0;
     uint32_t duplicateChunks = 0;
+    uint8_t expectedSha256[32] = {}; // START에 실려온 값 — END에서 재계산해 비교
 
     Cc1101Transport transport(devicePath);
     if (!transport.open()) {
@@ -155,6 +168,7 @@ int main(int argc, char *argv[])
                     seqSeen.assign(expectedChunks, false);
                     writtenChunks = 0;
                     duplicateChunks = 0;
+                    std::memcpy(expectedSha256, packet.imageSha256, sizeof(expectedSha256));
                     std::cout << "[smoke_recv]   -> " << outPath
                               << " 생성 (" << packet.imageSize << "byte 예약)\n";
                 }
@@ -228,10 +242,34 @@ int main(int argc, char *argv[])
                     std::cout << "\n"
                               << "  => 누락 구간은 0으로 남아 있으므로 원본과 다릅니다.\n";
                 } else {
-                    std::cout << "  누락 청크   : 없음\n"
-                              << "  => 모든 청크가 제자리에 기록됨. 아래로 최종 확인:\n"
-                              << "       (송신측) sha256sum <원본.bin>\n"
-                              << "       (수신측) sha256sum " << outPath << "\n";
+                    std::cout << "  누락 청크   : 없음\n";
+
+                    // [추가 2026-08-19] 지금까지는 "누락 0개"까지만 여기서
+                    // 확인하고, 실제 바이트 일치 여부는 사람이 양쪽에서
+                    // sha256sum을 손으로 돌려서 비교해야 했다. OTA_START의
+                    // image_sha256을 이제 송신측이 실제로 채워 보내므로
+                    // (session/otasession.cpp, 2026-08-19), 여기서 같은 방식
+                    // (core/sha256.h)으로 재조립된 파일의 해시를 직접 계산해
+                    // 비교하면 자동으로 판정할 수 있다 — ESP32의
+                    // ota_writer_finish()가 하는 검증과 정확히 같은 절차를
+                    // 미리 리허설하는 셈이기도 하다.
+                    outFile.flush();
+                    uint8_t actualSha256[32] = {};
+                    std::string sha256Error;
+                    if (!sha256File(outPath, actualSha256, &sha256Error)) {
+                        std::cout << "  SHA256      : 계산 실패 (" << sha256Error << ")\n";
+                    } else {
+                        const bool match = std::memcmp(actualSha256, expectedSha256,
+                                                         sizeof(actualSha256)) == 0;
+                        std::cout << "  기대 SHA256 : " << sha256ToHex(expectedSha256) << "\n"
+                                  << "  실제 SHA256 : " << sha256ToHex(actualSha256) << "\n"
+                                  << "  => " << (match ? "일치 (무결성 확인됨)"
+                                                        : "!! 불일치 — 파일이 손상됨 !!")
+                                  << "\n";
+                    }
+
+                    std::cout << "  (송신측과 직접 대조하려면) sha256sum <원본.bin> / sha256sum "
+                              << outPath << "\n";
                 }
             }
             break;

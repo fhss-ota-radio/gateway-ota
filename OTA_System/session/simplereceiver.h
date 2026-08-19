@@ -38,6 +38,12 @@ struct ReceivedPacket
     uint8_t  payloadLength = 0;      // Data
     uint8_t  resultCode = 0;         // Ack/Nack
     uint32_t deviceId = 0;           // DiscoverAck
+    uint8_t  imageSha256[32] = {};   // Start — 송신측이 OtaSession::start()에서
+                                      // 계산해 보낸 값 그대로. 수신측이 재조립
+                                      // 완료 후 자체적으로 계산한 해시와 비교하면
+                                      // (ESP32의 ota_writer_finish()가 하는 것과
+                                      // 같은 검증을) sha256sum을 손으로 안 돌려도
+                                      // 자동으로 확인할 수 있다.
 };
 
 // transport.recv()를 논블로킹(non-blocking, 데이터가 없어도 기다리지 않고

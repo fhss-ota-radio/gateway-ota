@@ -2,6 +2,8 @@
 
 #include "itransport.h"
 
+#include <cstring>
+
 extern "C" {
 #include "ota_protocol.h"
 }
@@ -30,6 +32,9 @@ ReceivedPacket tryReceiveOnce(ITransport &transport)
         result.targetDeviceId = fields.target_device_id;
         result.imageSize = fields.image_size;
         result.totalChunks = fields.total_chunks;
+        static_assert(sizeof(result.imageSha256) == sizeof(fields.image_sha256),
+                      "ReceivedPacket.imageSha256 크기가 ota_start_fields_t와 다릅니다");
+        std::memcpy(result.imageSha256, fields.image_sha256, sizeof(result.imageSha256));
         break;
     }
     case OTA_PKT_DATA: {
