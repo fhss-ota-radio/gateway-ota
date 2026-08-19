@@ -206,15 +206,42 @@ void OtaSession::enterSendingBatch(int64_t nowMs)
 
     // 배치 안 청크를 처음부터 끝까지 순서대로 전부 전송 — 슬라이딩 윈도우가
     // 아니라 고정 크기 배치를 한꺼번에 다 쏘는 방식 (fsm-design.md §6).
-    // 중간에 개별 ACK를 기다리지 않음: 확인은 아래 WAITING_BATCH_ACK에서 함.
+    // 중간에 개별 ACK를 "기다리지"는 않지만(그러면 배치 방식 자체가 무의미),
+    // 아래처럼 짧은 간격으로 폴링은 한다 — 이유는 바로 아래 주석.
     for (auto &slot : m_batch) {
         if (!m_transport.send(slot.packet)) {
             fail("OTA_DATA 전송 실패 (sequence=" + std::to_string(slot.sequence) + ")");
             return;
         }
         slot.sentAtMs = nowMs;
-        if (m_chunkDelayMs > 0)
-            std::this_thread::sleep_for(std::chrono::milliseconds(m_chunkDelayMs));
+
+        // [효율 개선 2026-08-19] 예전에는 여기서 그냥 sleep_for(chunkDelayMs)만
+        // 하고 recv()를 전혀 안 불렀다. 그런데 수신측은 DATA를 받자마자 바로
+        // ACK를 보내므로, 배치 나머지를 마저 보내는 이 ~(batchSize-1)*
+        // chunkDelayMs(예: 4*40=160ms) 구간 동안 이미 도착해 있을 ACK를
+        // 소프트웨어가 아예 읽지 않고 흘려보내는 셈이었다. CC1101 자체는
+        // 각 send() 완료 뒤 MCSM1 설정대로 RX로 자동 복귀하므로(반이중이라
+        // "송신하는 그 순간"만 못 듣는 것) 이 sleep 구간에는 원래 들을 수
+        // 있었는데, 코드가 안 듣고 있었을 뿐이다.
+        //
+        // 실기기 재검증(2026-08-19, docs/note/design-notes-gateway-ota-es.md
+        // 27절)에서 이게 실제로 중복 수신의 주 원인으로 확인됐다 — 1067개
+        // 청크 중 1062~1063개가 중복 수신됐는데, 정확히 "배치 최초 전송분은
+        // 전부 놓치고 그 다음 타임아웃 재전송에서만 ACK를 받는" 패턴과
+        // 맞아떨어진다. chunkDelayMs를 짧은 간격(kPollIntervalMs)으로
+        // 쪼개서 그 사이사이 recv()를 폴링하면, 이미 도착한 ACK를 놓치지
+        // 않고 바로 반영해서 불필요한 재전송을 줄일 수 있다.
+        if (m_chunkDelayMs > 0) {
+            constexpr int kPollIntervalMs = 5;
+            int remainingMs = m_chunkDelayMs;
+            while (remainingMs > 0) {
+                const int step = std::min(remainingMs, kPollIntervalMs);
+                std::this_thread::sleep_for(std::chrono::milliseconds(step));
+                remainingMs -= step;
+                if (!pollAndApplyAckOrNack(nowMs))
+                    return; // fail() 처리됨 — 배치 나머지 전송 중단
+            }
+        }
     }
 
     // [2026-08-19 추가했다가 같은 날 되돌림] 배치 전송 직후 flushRx()를
@@ -256,9 +283,8 @@ bool OtaSession::retransmitSlot(BatchSlot &slot, int64_t nowMs)
     return true;
 }
 
-void OtaSession::tickWaitingBatchAck(int64_t nowMs)
+bool OtaSession::pollAndApplyAckOrNack(int64_t nowMs)
 {
-    // 1. 수신 확인 (논블로킹 폴링 — 한 틱에 패킷 하나만 처리, tryReceiveOnce와 동일 패턴)
     const auto packet = tryReceiveOnce(m_transport);
     if ((packet.kind == ReceivedPacketKind::Ack || packet.kind == ReceivedPacketKind::Nack)
         && packet.sessionId == m_sessionId) {
@@ -275,11 +301,19 @@ void OtaSession::tickWaitingBatchAck(int64_t nowMs)
                 // NACK 이중 방어 — 타임아웃을 기다리지 않고 그 슬롯만 즉시 재전송
                 // (fsm-design.md §6 "슬롯별 독립 타이머 + NACK 이중 방어")
                 if (!retransmitSlot(slot, nowMs))
-                    return; // fail() 처리됨
+                    return false; // fail() 처리됨
             }
             break;
         }
     }
+    return true;
+}
+
+void OtaSession::tickWaitingBatchAck(int64_t nowMs)
+{
+    // 1. 수신 확인 (논블로킹 폴링 — 한 틱에 패킷 하나만 처리, tryReceiveOnce와 동일 패턴)
+    if (!pollAndApplyAckOrNack(nowMs))
+        return; // fail() 처리됨
 
     // 2. 타임아웃 확인 — 아직 acked=false인 슬롯만.
     //

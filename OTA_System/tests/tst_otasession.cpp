@@ -329,6 +329,46 @@ void resumeDoesNotCauseSpuriousTimeout()
     std::cout << "[OK] resumeDoesNotCauseSpuriousTimeout\n";
 }
 
+// [효율 개선 2026-08-19] 배치 전송(enterSendingBatch) 도중에도 이미 도착한
+// ACK를 그 자리에서 폴링해서 반영하는지 확인. 예전에는 배치를 다 보낼
+// 때까지(chunkDelayMs만큼 sleep만 하고) recv()를 아예 안 불러서, 전송 중
+// 도착한 ACK를 다음 WaitingBatchAck 틱까지 놓쳤다 — 반이중 CC1101 실기기
+// 재검증(docs/note/design-notes-gateway-ota-es.md 27절)에서 중복 재전송
+// (1067개 중 1062~1063개)의 주 원인으로 확인된 패턴.
+//
+// chunkDelayMs>0으로 설정해 폴링 구간이 실제로 생기게 하고, START ACK와
+// slot0(seq0)의 DATA ACK를 미리 큐에 넣어둔 뒤, 이 배치를 촉발한 단 한
+// 번의 tick() 호출 안에서 slot0이 이미 acked로 반영되는지 확인한다 —
+// 옛 코드였다면 이 시점엔 아직 0이었을 것(다음 tick까지 큐에 남아있었을 것).
+void batchSendingPollsAlreadyArrivedAckDuringSend()
+{
+    const std::string path = writeTempFile("os_pollduring.bin", repeat('H', 48 + 10)); // 2청크
+    constexpr uint32_t kSessionId = 0x88888888u;
+
+    FakeTransport transport;
+    // chunkDelayMs=10ms (내부 폴링 간격 5ms 기준 슬롯당 2번 폴링) — 테스트가
+    // 실제로 짧게(총 약 20ms) 기다리지만 무시할 수준.
+    OtaSession session(transport, /*batchSize=*/2, /*timeoutMs=*/300, /*maxRetry=*/5,
+                        /*chunkDelayMs=*/10);
+
+    session.start(path, 1, kSessionId, 1000);
+
+    // START ACK와 slot0 DATA ACK를 미리 큐에 순서대로 넣어둠 — slot0을
+    // 보내고 나서 첫 폴링 구간에서 바로 소비될 것으로 기대.
+    transport.rxQueue.push_back(
+        makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_START, OTA_CONTROL_SEQUENCE));
+    transport.rxQueue.push_back(makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_DATA, 0));
+
+    session.tick(1010); // Handshaking -> SendingBatch(slot0,1 전송) -> WaitingBatchAck
+
+    assert(session.state() == OtaSessionState::WaitingBatchAck);
+    assert(transport.countSentOfType(OTA_PKT_DATA) == 2); // seq0,1 최초 전송만 (재전송 없음)
+    assert(session.progress().ackedChunks == 1); // slot0이 배치 전송 "도중"에 이미 반영됨
+
+    std::remove(path.c_str());
+    std::cout << "[OK] batchSendingPollsAlreadyArrivedAckDuringSend\n";
+}
+
 } // namespace
 
 int main()
@@ -340,6 +380,7 @@ int main()
     handshakeMaxRetryExceededLeadsToFailed();
     endNackGoesDirectlyToFailedWithoutRetry();
     resumeDoesNotCauseSpuriousTimeout();
+    batchSendingPollsAlreadyArrivedAckDuringSend();
     std::cout << "\n모든 테스트 통과\n";
     return 0;
 }

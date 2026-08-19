@@ -155,6 +155,13 @@ private:
     void tickWaitingBatchAck(int64_t nowMs);
     // 슬롯 하나를 재전송. retryCount가 maxRetry를 넘으면 fail() 처리하고 false 반환.
     bool retransmitSlot(BatchSlot &slot, int64_t nowMs);
+    // ACK/NACK 패킷 하나를 논블로킹으로 폴링해서, 있으면 현재 배치(m_batch)에
+    // 반영한다(tickWaitingBatchAck()의 "1. 수신 확인" 단계와
+    // enterSendingBatch()의 배치 전송 중 폴링이 이 로직을 공유하기 위해 분리함
+    // — 2026-08-19 전송 효율 개선, 아래 enterSendingBatch() 주석 참고).
+    // 재전송 한도 초과로 fail()이 호출됐으면 false를 반환 — 호출부는 이후
+    // 처리를 즉시 중단해야 한다.
+    bool pollAndApplyAckOrNack(int64_t nowMs);
 
     void enterWaitingEndAck(int64_t nowMs);
     void tickWaitingEndAck(int64_t nowMs);
