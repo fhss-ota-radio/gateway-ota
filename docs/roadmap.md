@@ -319,19 +319,48 @@ cmp -l test.bin recv.bin | awk '{print int(($1-1)/48)}' | sort -n | uniq -c
    `chunkDelayMs`(40)·타임아웃(300ms) 조합 재조정이 후보
 6. `otamanager.cpp`(화면)에 실제 전송 로직 연결 — `OtaSession::tick()`을
    Qt `QTimer`로 주기 호출, `setOnStateChanged()`로 진행률바·로그 갱신
+7. ~~`OTA_START`에 실제 SHA256 채워 보내기~~ **완료 (2026-08-19)** — 아래
+   "ESP32 통합 전 필요 작업" 절 참고
 
 ### 성능 / 팀 협의
 
-7. **`chunkDelayMs`를 40ms 아래로** — 현재 1067청크에 약 43초. 10ms에서는
+8. **`chunkDelayMs`를 40ms 아래로** — 현재 1067청크에 약 43초. 10ms에서는
    패킷 경계가 밀림. `out_rearm`에서 `SFRX` 없이 `SRX`만 하는 것이 관련
    있을 수 있음(유저공간 구현은 매번 `SIDLE; SFRX; SRX`로 완전히 비움)
-8. `ota-protocol`의 `OTA_BROADCAST_DEVICE_ID`(0xFFFFFFFF) vs
+9. `ota-protocol`의 `OTA_BROADCAST_DEVICE_ID`(0xFFFFFFFF) vs
    `OTA_DEVICE_ID_MAX`(0xFFFFFF) 범위 모순 — 팀 합의 필요
-9. **누가 어떤 주파수/싱크워드/채널을 쓰는지 팀 관리표 만들기** —
-   이번 충돌 사고의 근본 원인
-10. `DISCOVER`/`DISCOVER_ACK` 기반 기기 탐색 흐름 구현
-11. ESP32 쪽 `main/fsm.c`의 OTA 수신 배선(TODO, 담당 "팀2") 완료 후
-    실제 게이트웨이→ESP32 종단 간 테스트
+10. **누가 어떤 주파수/싱크워드/채널을 쓰는지 팀 관리표 만들기** —
+    이번 충돌 사고의 근본 원인
+11. `DISCOVER`/`DISCOVER_ACK` 기반 기기 탐색 흐름 구현
+12. ESP32 쪽 `main/fsm.c`의 OTA 수신 배선(TODO, 담당 "팀2") 완료 후
+    실제 게이트웨이→ESP32 종단 간 테스트 — 아래 "ESP32 통합 전 필요 작업" 참고
+
+### ESP32 통합 전 필요 작업 (2026-08-19 추가)
+
+`firmware-esp32`의 실제 수신 코드(`ota_client.c`/`ota_writer.c`/
+`ota_consumer.c`)를 읽어보고 발견한, 라즈베리파이끼리 테스트할 때는 안
+드러나던 블로커입니다.
+
+- [x] **`OTA_START`의 `image_sha256`을 실제 값으로 채우기** — 지금까지
+      `OtaSession`은 이 필드를 0으로만 채워 보냈습니다(수신측이 라즈베리
+      파이일 땐 이 값을 안 봐서 문제없었음). 그런데 ESP32
+      `ota_writer_finish()`는 `psa_hash_finish()`로 실제 수신 데이터의
+      SHA256을 계산해 이 필드와 `memcmp()`로 비교하고, 다르면
+      `ESP_ERR_INVALID_CRC`를 돌려줘서 `OTA_END`가 항상 NACK됩니다 —
+      즉 **DATA 전송은 1067/1067 전부 성공해도 마지막 한 걸음에서 항상
+      거부당하는 구조**였습니다. 외부 라이브러리(OpenSSL/mbedtls) 없이
+      `core/sha256.h/.cpp`에 표준 SHA-256을 직접 구현해서 해결(경계값
+      55/56/57/63/64/65/119/120/128byte + 10만byte 파일까지 자체 테스트
+      통과, 유닛테스트 7개 회귀 확인). `OtaSession::start()`가 파일을 읽는
+      시점에 해시를 계산해 두고, `sendStartPacket()`에서 그대로 실어 보냄.
+      실기기(라즈베리파이-라즈베리파이) 재검증은 아직 안 함 — 다음 스모크
+      테스트에서 확인 필요.
+- [ ] ESP32 `ota_batch_cache.h`의 `OTA_CLIENT_DATA_MAX_PAYLOAD_SIZE`(48)가
+      공유 헤더 `ota_protocol.h`의 `OTA_MAX_PAYLOAD_SIZE`를 참조하지 않고
+      독립된 매직넘버로 따로 정의돼 있음 — 지금 당장 문제는 아니지만 둘 중
+      하나만 바뀌면 조용히 깨질 수 있는 지점, 팀 공유 필요
+- [ ] Pi-to-ESP32 실통합 테스트 자체 — 위 두 항목 + 항목 12(ESP32 수신
+      배선)까지 끝나야 시작 가능
 
 ---
 
