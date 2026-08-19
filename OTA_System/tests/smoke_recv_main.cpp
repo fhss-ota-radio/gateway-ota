@@ -286,32 +286,23 @@ int main(int argc, char *argv[])
             const bool acked = sendAckFor(transport, packet);
             std::cout << "[smoke_recv]   -> ACK " << (acked ? "전송함" : "전송 실패") << "\n";
 
-            // [임시 우회책 2026-08-19 — 드라이버가 고쳐지면 이 줄만 지우면 됨]
+            // [우회책 2026-08-19 도입 → 2026-08-19 같은 날 제거하고 재검증]
             //
-            // 증상: OtaSession(배치 ACK+재전송)으로 전송하면 이 프로그램이 DATA를
-            // 6개쯤 받고 나서 그 뒤로 아무것도 수신하지 못했다. 송신측은 계속
-            // 재전송하는데 dmesg에는 드롭 메시지조차 없이 수신 로그 자체가 끊겼고,
-            // 칩은 MARCSTATE=0x0D(RX 정상)로 보고했다.
+            // 증상이었던 것: OtaSession(배치 ACK+재전송)으로 전송하면 이 프로그램이
+            // DATA를 6개쯤 받고 나서 그 뒤로 아무것도 수신하지 못했다(추정 원인:
+            // kernel-cc1101-spi의 cc1101_gdo0_thread()가 GDO0 하나로 TX/RX 완료를
+            // 모두 처리하는데, TX 완료 엣지를 놓치면 cc->state가 CC1101_STATE_TX에
+            // 갇혀 그 뒤 수신 인터럽트가 전부 폐기됨 — 자세한 분석은
+            // docs/note/bug-report-cc1101-rx-stall-2026-08-19.md).
             //
-            // 원인(추정): kernel-cc1101-spi의 cc1101_gdo0_thread()는 GDO0 하나로
-            // TX 완료와 RX 완료를 모두 처리하고 그 갈림길이 드라이버 내부 변수
-            // cc->state다. TX 완료 엣지를 놓치면 state가 CC1101_STATE_TX에 갇히고,
-            // 그 뒤 들어오는 수신 인터럽트는 전부 TX 분기로 빠져 폐기된다 —
-            // cc1101_handle_rx_packet()에 영영 도달하지 못한다.
-            // (자세한 분석은 docs/note/bug-report-cc1101-rx-stall-2026-08-19.md)
+            // 드라이버 담당자가 이 부분을 고쳤다고 전달받아서, 우회책
+            // (ACK 직후 transport.startRx() 강제 호출)을 지우고 다시 검증하는 중.
+            // 이 줄이 없어도 기존과 동일하게 성공하면 드라이버 수정이 실제로
+            // 효과가 있었다는 뜻 — docs/roadmap.md 3절 "완료 조건"이 요구하던
+            // 바로 그 조건(우회책 없이 성공)이 이걸로 충족됨.
             //
-            // 우회 원리: CC1101_IOC_SET_RX(=startRx())가 부르는 cc1101_enter_rx()가
-            // cc->state = CC1101_STATE_RX로 되돌린다(cc1101_core.c 268행). 그래서
-            // ACK를 보낸 직후마다 한 번씩 불러 상태를 RX로 확정시킨다.
-            //
-            // 왜 flushRx()가 아니라 startRx()인가: FLUSH_RX는 kfifo_reset()까지
-            // 해서 이미 도착해 대기 중인 패킷을 버린다(실제로 8/19에 송신측에
-            // flushRx()를 넣었다가 도착한 ACK가 지워져 상황이 악화됐다).
-            // SET_RX는 큐를 건드리지 않고 상태만 되돌리므로 안전하다.
-            //
-            // 참고: 실제 수신 대상은 ESP32이고 거기엔 이 리눅스 드라이버가 없다.
-            // 즉 이 우회책은 라즈베리파이 2대로 하는 내 테스트에만 필요하다.
-            transport.startRx();
+            // 실패하면(다시 DATA 6개쯤에서 멎으면) 아래 줄을 되살리면 됨:
+            //   transport.startRx();
         }
     }
 }
