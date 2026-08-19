@@ -203,6 +203,17 @@ void OtaSession::enterSendingBatch(int64_t nowMs)
             std::this_thread::sleep_for(std::chrono::milliseconds(m_chunkDelayMs));
     }
 
+    // [2026-08-19 추가했다가 같은 날 되돌림] 배치 전송 직후 flushRx()를
+    // 불러서 "혹시 쌓인 RX 버퍼가 문제가 아닐까" 시도했었는데, 실기기
+    // 재검증 결과 오히려 역효과였습니다 — 배치 안 첫 번째로 보낸 청크는
+    // 배치 나머지를 다 보내는 동안(최대 (batchSize-1)*chunkDelayMs, 예:
+    // 4*40=160ms) 이미 ACK가 도착해 RX 버퍼에 들어와 있을 가능성이 높은데,
+    // 여기서 flushRx()를 부르면 그 "이미 도착한 진짜 ACK"까지 같이
+    // 지워버려서 불필요한 재전송을 유발했습니다(2026-08-19 재검증 로그:
+    // 수신측은 DATA를 끊김 없이 계속 받는데 송신측만 seq=0 재전송을
+    // 반복하다 실패). RXFIFO_OVERFLOW 자체를 marc_state로 직접 확인하지
+    // 않고 가설만으로 패치했던 게 원인 — 다음에 이 계열 문제가 다시
+    // 나오면 cc1101_diag로 marc_state부터 확인하고 나서 손댈 것.
     setState(OtaSessionState::WaitingBatchAck);
 }
 
@@ -219,6 +230,14 @@ bool OtaSession::retransmitSlot(BatchSlot &slot, int64_t nowMs)
     setState(OtaSessionState::Retransmitting);
     m_transport.send(slot.packet);
     slot.sentAtMs = nowMs;
+
+    // [추가 2026-08-19] 재전송에도 배치 전송과 같은 간격을 둔다.
+    // enterSendingBatch()는 청크 사이에 chunkDelayMs를 넣는데 여기만 빠져
+    // 있었다 — 그래서 재전송이 쉬는 시간 없이 붙어 나갔고, 반이중인 CC1101이
+    // 그동안 돌아온 ACK를 못 들었다(위 tickWaitingBatchAck() 주석 참고).
+    if (m_chunkDelayMs > 0)
+        std::this_thread::sleep_for(std::chrono::milliseconds(m_chunkDelayMs));
+
     setState(OtaSessionState::WaitingBatchAck);
     return true;
 }
@@ -248,7 +267,22 @@ void OtaSession::tickWaitingBatchAck(int64_t nowMs)
         }
     }
 
-    // 2. 타임아웃 확인 — 아직 acked=false인 슬롯만
+    // 2. 타임아웃 확인 — 아직 acked=false인 슬롯만.
+    //
+    // [수정 2026-08-19] 한 틱에 "하나만" 재전송한다 (원래는 타임아웃된 슬롯
+    // 전부를 이 루프에서 연달아 쐈음).
+    //
+    // 실기기 검증에서 드러난 문제: 배치 5개가 거의 동시에 타임아웃되면 이
+    // 루프가 한 틱 안에서 5개를 쉬는 시간 없이 연속 송신했다. CC1101은
+    // 반이중(half-duplex, 송신 중에는 수신 불가)이라, 그동안 수신측이 보낸
+    // ACK가 전부 송신측 귀에 안 들어온다. 그러면 다음 타임아웃에 또 5개를
+    // 몰아 쏘고 또 못 듣고… 이 악순환이 maxRetry회 반복되면 "재전송 한도
+    // 초과"로 죽는다. 실제로 수신측 로그에는 해당 seq를 정상 수신하고 ACK를
+    // 보낸 기록이 남아 있는데도 송신측만 못 받고 실패했다.
+    //
+    // 하나씩 보내면 send() 이후 다음 틱까지(호출부 기준 10ms) 반드시 수신
+    // 기회가 생기고, 아래 chunkDelayMs 간격까지 더해져 상대 ACK가 돌아올
+    // 시간이 확보된다.
     for (auto &slot : m_batch) {
         if (slot.acked)
             continue;
@@ -256,6 +290,7 @@ void OtaSession::tickWaitingBatchAck(int64_t nowMs)
             continue;
         if (!retransmitSlot(slot, nowMs))
             return; // fail() 처리됨
+        break;      // 한 틱에 하나만 — 나머지는 다음 틱에서 다시 판정
     }
 
     // 3. 배치 전체 완료 확인 — 슬롯 하나가 끝났다고 다음 seq를 채워 넣지 않고,
