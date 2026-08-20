@@ -25,6 +25,11 @@ OtaManager::OtaManager(QWidget *parent)
     setupConnections();
     loadSettings();
 
+    // 청크 크기는 사용자가 정하는 값이 아니라 OTA_MAX_PAYLOAD_SIZE(무선 패킷
+    // 본문 최대 크기에서 정해지는 프로토콜 고정값)라서, .ui의 텍스트를 여기서
+    // 그 상수로 덮어씀 — 나중에 프로토콜이 바뀌어도 .ui를 따로 안 고쳐도 됨
+    ui->chunkSizeValueLabel->setText(tr("%1 (고정)").arg(OTA_MAX_PAYLOAD_SIZE));
+
     // otasession.h 84행: "Qt라면 QTimer로 주기 호출, 예: 10ms 간격" — 그대로.
     // 세션이 없을 때(m_session == nullptr)는 onSessionTick()이 조용히 리턴하므로
     // 타이머는 앱 시작 시부터 그냥 계속 돌려도 안전함 (매번 세션 유무를 따로
@@ -62,7 +67,6 @@ void OtaManager::setupConnections()
     // 하나만 연결해도 다른 라디오버튼이 바뀔 때 같이 toggled가 발생함
     connect(ui->unicastRadio, &QRadioButton::toggled, this, &OtaManager::onModeChanged);
     connect(ui->selectFileButton, &QPushButton::clicked, this, &OtaManager::onSelectFileClicked);
-    connect(ui->chunkSizeSpin, &QSpinBox::valueChanged, this, &OtaManager::onChunkSizeChanged);
     connect(ui->startButton, &QPushButton::clicked, this, &OtaManager::onStartClicked);
     connect(ui->pauseButton, &QPushButton::clicked, this, &OtaManager::onPauseClicked);
     connect(ui->hopSeedRandomButton, &QPushButton::clicked, this, &OtaManager::onHopSeedRandomClicked);
@@ -83,7 +87,6 @@ void OtaManager::loadSettings()
 
     const QString port = settings.value(QStringLiteral("transport/port"), QStringLiteral("/dev/cc1101")).toString();
     const int driverIndex = settings.value(QStringLiteral("transport/driverIndex"), 0).toInt();
-    const int chunkSize = settings.value(QStringLiteral("file/chunkSize"), 48).toInt(); // ota-protocol OTA_MAX_PAYLOAD_SIZE (v0.2, 2026-08-11 갱신)
     const bool broadcast = settings.value(QStringLiteral("target/broadcast"), false).toBool();
     // 기본값 없음(빈 문자열) — 코드에 시드를 하드코딩하지 않기 위해서.
     // 사용자가 직접 입력하거나 "무작위 생성"으로 채워야 함
@@ -92,7 +95,6 @@ void OtaManager::loadSettings()
     ui->portEdit->setText(port);
     if (driverIndex >= 0 && driverIndex < ui->driverCombo->count())
         ui->driverCombo->setCurrentIndex(driverIndex);
-    ui->chunkSizeSpin->setValue(chunkSize);
     if (broadcast)
         ui->broadcastRadio->setChecked(true);
     else
@@ -105,7 +107,6 @@ void OtaManager::saveSettings()
     QSettings settings(QStringLiteral("gateway-ota"), QStringLiteral("OtaManager"));
     settings.setValue(QStringLiteral("transport/port"), ui->portEdit->text());
     settings.setValue(QStringLiteral("transport/driverIndex"), ui->driverCombo->currentIndex());
-    settings.setValue(QStringLiteral("file/chunkSize"), ui->chunkSizeSpin->value());
     settings.setValue(QStringLiteral("target/broadcast"), ui->broadcastRadio->isChecked());
     settings.setValue(QStringLiteral("fhss/hopSeed"), ui->hopSeedEdit->text());
 }
@@ -118,11 +119,14 @@ void OtaManager::appendLog(const QString &tag, const QString &message)
 
 void OtaManager::recalcChunkInfo()
 {
-    if (m_selectedFileSize <= 0 || ui->chunkSizeSpin->value() <= 0) {
+    if (m_selectedFileSize <= 0) {
         ui->totalChunksValueLabel->setText(QStringLiteral("-"));
         return;
     }
-    const qint64 chunkSize = ui->chunkSizeSpin->value();
+    // 청크 크기는 사용자가 정하는 값이 아니라 OTA_MAX_PAYLOAD_SIZE 고정값 —
+    // 실제 전송(OtaSession)이 이 값으로만 분할하므로 여기서도 반드시 같은
+    // 값을 써야 화면에 보이는 "총 청크 수"가 실제와 일치함
+    const qint64 chunkSize = OTA_MAX_PAYLOAD_SIZE;
     // 올림 나눗셈: 마지막 청크가 청크 크기보다 작아도 1개로 세기 위함 (패딩 처리 대상)
     const qint64 totalChunks = (m_selectedFileSize + chunkSize - 1) / chunkSize;
     ui->totalChunksValueLabel->setText(QString::number(totalChunks));
@@ -206,12 +210,6 @@ void OtaManager::onSelectFileClicked()
     ui->fileSizeValueLabel->setText(QStringLiteral("%1 KB").arg(m_selectedFileSize / 1024.0, 0, 'f', 1));
     recalcChunkInfo();
     appendLog(QStringLiteral("INFO"), tr("파일 선택: %1 (%2 byte)").arg(info.fileName()).arg(m_selectedFileSize));
-}
-
-void OtaManager::onChunkSizeChanged(int value)
-{
-    Q_UNUSED(value);
-    recalcChunkInfo();
 }
 
 void OtaManager::onStartClicked()

@@ -33,7 +33,6 @@ private slots:
     void onConnectClicked();
     void onModeChanged();
     void onSelectFileClicked();
-    void onChunkSizeChanged(int value);
     void onStartClicked();
     void onPauseClicked();
     void onHopSeedRandomClicked();
@@ -55,7 +54,7 @@ private:
 
     // otamanager.ui에서 setupUi()가 채워주는 위젯 트리 (driverCombo, portEdit,
     // connectButton, unicastRadio/broadcastRadio, targetCombo, selectFileButton,
-    // chunkSizeSpin, progressBar, logView 등은 전부 Ui::OtaManager의 멤버)
+    // chunkSizeValueLabel, progressBar, logView 등은 전부 Ui::OtaManager의 멤버)
     Ui::OtaManager *ui;
 
     bool m_connected = false;
