@@ -154,6 +154,13 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
       오판 유발). 유닛테스트 2개 추가(옛 코드에서 실패 확인 후 수정 →
       전체 10개 통과). 나머지 2건(응답 타입 미검증/stale NACK 재시도)은
       근거 부족으로 보류. 상세: `docs/note/design-notes-gateway-ota-es.md` 34절
+- [x] **(2026-08-20) `acknowledged_type` 검증 추가** — 위에서 보류했던
+      "응답 타입 미검증" 항목. ACK/NACK이 어떤 패킷(START/DATA/END)에
+      대한 응답인지 확인 안 하고 sessionId+sequence만으로 매칭하던 부분에
+      `acknowledged_type` 검증을 추가(`ReceivedPacket.acknowledgedType`
+      필드 신설). 유닛테스트 2개 추가, 전체 12개 통과. 실기기 핸드셰이크
+      무응답은 ESP32를 OTA 메뉴에 수동 진입시켜야 하는 절차 문제로 추정 —
+      상세: `docs/note/design-notes-gateway-ota-es.md` 35절
 
 ## 문서
 

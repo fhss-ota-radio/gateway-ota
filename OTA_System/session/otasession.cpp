@@ -152,8 +152,17 @@ void OtaSession::tickHandshaking(int64_t nowMs)
 
     // START/END에 대한 응답은 "제어 패킷 자체에 대한 응답"이라 sequence 자리에
     // OTA_CONTROL_SEQUENCE가 옴 (simplesender.cpp performHandshake()와 동일 규칙).
+    //
+    // [버그 수정 2026-08-20, ESP32 담당자 리포트 클레임 1] acknowledged_type도
+    // 같이 확인한다. 예전엔 sessionId+sequence만 봤는데, OTA_CONTROL_SEQUENCE가
+    // START/END 응답 둘 다에 쓰이는 값이라(ota_protocol.h 규칙) 이론상 END에
+    // 대한 응답을 START 응답으로 잘못 받아들일 여지가 있었다(sequence 공간이
+    // 완전히 안 나뉘어 있었던 지점). 실제로 재현된 적은 없지만(START/END는
+    // 시간상 겹칠 일이 없어서), 프로토콜이 명시적으로 실어 보내는 정보를
+    // 검증 안 하고 버리는 건 잠재 버그라 이번에 같이 잠근다.
     const bool matchesOurStart =
-        packet.sessionId == m_sessionId && packet.sequence == OTA_CONTROL_SEQUENCE;
+        packet.sessionId == m_sessionId && packet.sequence == OTA_CONTROL_SEQUENCE
+        && packet.acknowledgedType == static_cast<uint8_t>(OTA_PKT_START);
 
     if (packet.kind == ReceivedPacketKind::Ack && matchesOurStart) {
         enterSendingBatch(nowMs);
@@ -301,8 +310,16 @@ bool OtaSession::retransmitSlot(BatchSlot &slot, int64_t nowMs)
 bool OtaSession::pollAndApplyAckOrNack(int64_t nowMs)
 {
     const auto packet = tryReceiveOnce(m_transport);
+    // [버그 수정 2026-08-20, ESP32 담당자 리포트 클레임 1] acknowledged_type이
+    // OTA_PKT_DATA인 응답만 배치 슬롯에 매칭한다. 예전엔 이 필드를 확인 안
+    // 하고 sequence만 봤는데, sequence 하나만으로는 "이게 START/END에 대한
+    // 응답인데 우연히 지금 배치의 어느 슬롯 sequence와 같은 값이 되는" 경우를
+    // 걸러낼 수 없었다 — OTA_CONTROL_SEQUENCE가 작은 배치 sequence(0,1,2...)와
+    // 겹칠 수치는 아니라 실제로 재현되진 않았지만, 프로토콜이 명시적으로
+    // 실어 보내는 구분 정보를 검증 안 하고 버리는 건 잠재 버그였다.
     if ((packet.kind == ReceivedPacketKind::Ack || packet.kind == ReceivedPacketKind::Nack)
-        && packet.sessionId == m_sessionId) {
+        && packet.sessionId == m_sessionId
+        && packet.acknowledgedType == static_cast<uint8_t>(OTA_PKT_DATA)) {
         for (auto &slot : m_batch) {
             if (slot.acked || slot.sequence != packet.sequence)
                 continue;
@@ -433,8 +450,11 @@ void OtaSession::enterWaitingEndAck(int64_t nowMs)
 void OtaSession::tickWaitingEndAck(int64_t nowMs)
 {
     const auto packet = tryReceiveOnce(m_transport);
+    // [2026-08-20, 위 tickHandshaking() matchesOurStart와 같은 이유] END 응답도
+    // acknowledged_type을 같이 확인해서 START 응답과 혼동될 여지를 없앤다.
     const bool matchesOurEnd =
-        packet.sessionId == m_sessionId && packet.sequence == OTA_CONTROL_SEQUENCE;
+        packet.sessionId == m_sessionId && packet.sequence == OTA_CONTROL_SEQUENCE
+        && packet.acknowledgedType == static_cast<uint8_t>(OTA_PKT_END);
 
     if (packet.kind == ReceivedPacketKind::Ack && matchesOurEnd) {
         setState(OtaSessionState::Completed);

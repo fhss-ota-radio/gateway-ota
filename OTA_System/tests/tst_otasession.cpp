@@ -463,6 +463,68 @@ void batchSlotsGetIndividualSentAtMsNotSharedBatchStart()
     std::cout << "[OK] batchSlotsGetIndividualSentAtMsNotSharedBatchStart\n";
 }
 
+// [버그 수정 2026-08-20, ESP32 담당자 리포트 클레임 1] START ACK를 기다리는
+// 중에 sessionId/sequence(OTA_CONTROL_SEQUENCE)는 맞지만 acknowledged_type이
+// START가 아닌(END인 척하는) ACK가 와도 이걸 START 응답으로 착각해서 넘어가면
+// 안 된다 — OTA_CONTROL_SEQUENCE 값만으로는 START/END 응답을 구분할 수 없어서
+// acknowledged_type까지 같이 확인해야 한다.
+void handshakeIgnoresAckWithWrongAcknowledgedType()
+{
+    const std::string path = writeTempFile("os_wrongtype1.bin", repeat('L', 10)); // 1청크
+    constexpr uint32_t kSessionId = 0xCCCCCCCCu;
+
+    FakeTransport transport;
+    OtaSession session(transport, 1, /*timeoutMs=*/300, /*maxRetry=*/5, 0);
+
+    session.start(path, 1, kSessionId, 1000);
+    assert(session.state() == OtaSessionState::Handshaking);
+
+    // sessionId/sequence는 맞지만 acknowledged_type이 END인 "가짜" START ACK
+    transport.rxQueue.push_back(
+        makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_END, OTA_CONTROL_SEQUENCE));
+    session.tick(1010);
+    assert(session.state() == OtaSessionState::Handshaking); // 아직 안 넘어가야 함
+
+    // 진짜 START ACK가 오면 정상적으로 다음 단계로
+    transport.rxQueue.push_back(
+        makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_START, OTA_CONTROL_SEQUENCE));
+    session.tick(1020);
+    assert(session.state() == OtaSessionState::WaitingBatchAck);
+
+    std::remove(path.c_str());
+    std::cout << "[OK] handshakeIgnoresAckWithWrongAcknowledgedType\n";
+}
+
+// pollAndApplyAckOrNack()에서도 마찬가지 — acknowledged_type이 DATA가 아니면
+// sequence 값이 우연히 배치 슬롯의 sequence와 같아도 그 슬롯에 매칭하면 안 됨.
+void batchIgnoresAckWithWrongAcknowledgedType()
+{
+    const std::string path = writeTempFile("os_wrongtype2.bin", repeat('M', 10)); // 1청크
+    constexpr uint32_t kSessionId = 0xDDDDDDDDu;
+
+    FakeTransport transport;
+    OtaSession session(transport, 1, /*timeoutMs=*/300, /*maxRetry=*/5, 0);
+
+    session.start(path, 1, kSessionId, 1000);
+    transport.rxQueue.push_back(
+        makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_START, OTA_CONTROL_SEQUENCE));
+    session.tick(1010); // DATA(seq0) 전송, WaitingBatchAck
+    assert(session.state() == OtaSessionState::WaitingBatchAck);
+
+    // sequence는 seq0(0)과 우연히 같지만 acknowledged_type이 START인 "가짜" ACK
+    transport.rxQueue.push_back(makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_START, 0));
+    session.tick(1020);
+    assert(session.progress().ackedChunks == 0); // 매칭되면 안 됨
+
+    // 진짜 DATA ACK가 오면 정상 반영
+    transport.rxQueue.push_back(makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_DATA, 0));
+    session.tick(1030);
+    assert(session.progress().ackedChunks == 1);
+
+    std::remove(path.c_str());
+    std::cout << "[OK] batchIgnoresAckWithWrongAcknowledgedType\n";
+}
+
 } // namespace
 
 int main()
@@ -477,6 +539,8 @@ int main()
     batchSendingPollsAlreadyArrivedAckDuringSend();
     retransmitSlotPollsForResponseDuringItsOwnDelay();
     batchSlotsGetIndividualSentAtMsNotSharedBatchStart();
+    handshakeIgnoresAckWithWrongAcknowledgedType();
+    batchIgnoresAckWithWrongAcknowledgedType();
     std::cout << "\n모든 테스트 통과\n";
     return 0;
 }
