@@ -24,8 +24,13 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
 | 1 | Qt 프로젝트 세팅 및 화면 뼈대 | ✅ 완료 |
 | 2 | 전송 계층 추상화 + `Cc1101Transport` | ✅ 완료 (실기기 1067/1067) |
 | 3 | BIN 분할 + CRC | ✅ 완료 |
-| 4 | 핸드셰이크 + 송수신 + ACK | 🟡 `OtaSession`(배치 ACK+선택적 재전송) 구현·유닛테스트 완료(2026-08-18) / **실기기 검증·화면 연결은 아직** |
+| 4 | 핸드셰이크 + 송수신 + ACK | 🟡 `OtaSession`(배치 ACK+선택적 재전송) 구현·**실기기 검증 완료**(SHA256·NACK·전송효율 포함)·`DISCOVER` 구현·**Qt 화면 연결 완료**(2026-08-20, 브로드캐스트만) |
 | 5 | 실기기 통합 검증 | ✅ 완료 — 전송 + 재조립 무결성 검증 통과 |
+
+> **🚧 진행 중**: 라즈베리파이 → ESP32 실통합 OTA 전송 테스트 준비 중
+> (`test/esp32-integration` 브랜치, 지금까지는 라즈베리파이끼리만 검증됨).
+> Qt 화면은 방금 연결됐지만 실제 빌드 검증이 아직 필요함. 상세는
+> `docs/note/design-notes-gateway-ota-es.md` 31~33절.
 
 > **무선 손실 약 0.75%는 재전송(마일스톤 4)으로 메워야 합니다.**
 > 재조립 로직은 바이트 단위로 정확함이 검증됐지만, 재전송이 없으면
@@ -115,7 +120,7 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
       빌드/실행법은
       [`docs/testing-spidev-transport.md`](docs/testing-spidev-transport.md) 참고.
 
-### 마일스톤 4 — `OtaSession`(FSM) — 배치 ACK + 선택적 재전송 (진행 중)
+### 마일스톤 4 — `OtaSession`(FSM) — 배치 ACK + 선택적 재전송 (거의 완료)
 - [x] **(2026-08-18)** `session/otasession.h/.cpp` — [`docs/fsm-design.md`](docs/fsm-design.md)의
       송신측 상태기계 구현체. `HANDSHAKING`→`SENDING_BATCH`→`WAITING_BATCH_ACK`↔`RETRANSMITTING`→`WAITING_END_ACK`→`COMPLETED`/`FAILED`,
       `PAUSED` 포함. `simplesender`/`simplereceiver`의 START/END 인코딩·수신 디코딩을
@@ -126,14 +131,27 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
   - `tick(nowMs)`를 시각 파라미터로 받는 구조 — Qt `QTimer`로 주기 호출하면
     되고, 테스트에서는 가짜 시각을 넣어 타임아웃을 실제로 기다리지 않고 검증
   - `tests/tst_otasession.cpp` — `FakeTransport`(인메모리)로 핸드셰이크/배치
-    ACK/NACK 즉시재전송/타임아웃재전송/재시도초과/END NACK/일시정지-재개 7개
-    시나리오 전부 통과 (g++ -std=c++17 확인, ctest 등록됨)
-- [ ] **실기기(라즈베리파이 2대) 검증 — 아직.** `simplereceiver.cpp`의
-      `sendAckFor()`가 현재 NACK을 실제로 안 보내서(항상 ACK만 생성), NACK
-      경로는 시뮬레이션으로만 확인됨
-- [ ] `DISCOVER`/`DISCOVER_ACK` 기기 조회 — `OtaSession`에 의도적으로 미포함
-      (연결·화면 담당 상위 흐름, `docs/roadmap.md` 3절 참고)
-- [ ] `otamanager.cpp`(화면)에 연결 — 미착수
+    ACK/NACK 즉시재전송/타임아웃재전송/재시도초과/END NACK/일시정지-재개/
+    배치전송중폴링 8개 시나리오 전부 통과 (g++ -std=c++17 확인, ctest 등록됨)
+- [x] **실기기(라즈베리파이 2대) 검증 완료 (2026-08-19)** — 1067/1067 청크,
+      누락 0, SHA256 완전 일치. 전송 효율 개선(중복 수신 1063→5개)과
+      `sendAckFor()` NACK 실발신 버그 수정까지 실기기로 검증됨. 상세:
+      `docs/roadmap.md` 3절
+- [x] **`DISCOVER`/`DISCOVER_ACK` 기기 조회 구현 (2026-08-20)** —
+      `session/discovery.h/.cpp`의 `discoverDevices()`. `OtaSession`에는
+      의도적으로 미포함(연결·화면 담당 상위 흐름, `docs/roadmap.md` 3절 참고).
+      유닛테스트 통과, 실기기(ESP32) 검증은 아직 / 화면 연결도 아직
+- [x] **`otamanager.cpp`(화면)에 연결 (2026-08-20)** — `OtaSession`/
+      `Cc1101Transport`를 실제로 생성·연결. `setOnStateChanged()` 콜백
+      하나로 진행률바·로그·버튼 상태 갱신, `QTimer`(10ms)로 `tick()` 주기
+      호출. **지금은 브로드캐스트 전송만 실제로 동작** — 로컬 파일
+      드라이버(`LocalFileTransport` 미구현)와 유니캐스트(특정 기기 지정,
+      `targetCombo`가 아직 자리표시자라 실제 device_id 매핑 불가)는
+      의도적으로 막아둠, 화면에 안내 로그 표시. 호핑 난수(FHSS seed)
+      입력 UI도 같이 추가(연결(Transport) 카드) — 값 입력/저장만 되고
+      실제 파이·ESP32 연동은 아직. 자세한 설계 이유는
+      `docs/note/design-notes-gateway-ota-es.md` 32~33절. **Qt6 없는
+      샌드박스에서 작성해 실제 빌드 검증 필요**
 
 ## 문서
 

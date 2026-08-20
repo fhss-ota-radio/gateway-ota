@@ -1,6 +1,12 @@
 #include "otamanager.h"
 #include "ui_otamanager.h"
 
+#include "cc1101transport.h" // Cc1101Transport — driverCombo에서 "CC1101" 선택 시 실제로 생성
+
+extern "C" {
+#include "ota_protocol.h" // OTA_BROADCAST_DEVICE_ID
+}
+
 #include <QCloseEvent>
 #include <QDateTime>
 #include <QFileDialog>
@@ -9,6 +15,7 @@
 #include <QRegularExpression>
 #include <QRegularExpressionValidator>
 #include <QSettings>
+#include <QTimer>
 
 OtaManager::OtaManager(QWidget *parent)
     : QMainWindow(parent)
@@ -17,11 +24,28 @@ OtaManager::OtaManager(QWidget *parent)
     ui->setupUi(this);
     setupConnections();
     loadSettings();
+
+    // otasession.h 84행: "Qt라면 QTimer로 주기 호출, 예: 10ms 간격" — 그대로.
+    // 세션이 없을 때(m_session == nullptr)는 onSessionTick()이 조용히 리턴하므로
+    // 타이머는 앱 시작 시부터 그냥 계속 돌려도 안전함 (매번 세션 유무를 따로
+    // 챙기는 것보다 단순함).
+    m_tickTimer = new QTimer(this);
+    m_tickTimer->setInterval(10);
+    connect(m_tickTimer, &QTimer::timeout, this, &OtaManager::onSessionTick);
+    m_tickTimer->start();
+
     appendLog(QStringLiteral("INFO"), tr("화면 초기화 완료"));
 }
 
 OtaManager::~OtaManager()
 {
+    // m_session이 m_transport를 참조(ITransport&)로 들고 있어서, m_transport가
+    // 먼저 사라지면 안 됨 — unique_ptr 소멸 순서는 선언 역순(m_tickTimer,
+    // m_session, m_transport 순으로 선언했으니 소멸은 그 반대)이라 자동으로
+    // m_session이 m_transport보다 먼저 사라져서 문제없지만, 명시적으로 한 번
+    // 더 순서를 강제해서 이 불변조건이 헤더 선언 순서에 몰래 의존하지 않게 함.
+    m_session.reset();
+    m_transport.reset();
     delete ui;
 }
 
@@ -107,24 +131,65 @@ void OtaManager::recalcChunkInfo()
 
 void OtaManager::onConnectClicked()
 {
-    // TODO(부품 입고 후): 실제 ITransport 구현체(CC1101 fd open/ioctl)로 교체
-    m_connected = !m_connected;
     if (m_connected) {
-        ui->connectionStatusDot->setStyleSheet(QStringLiteral("background-color:#2ecc71; border-radius:5px;"));
-        ui->connectionStatusLabel->setText(tr("연결됨 (%1)").arg(ui->driverCombo->currentText()));
-        ui->connectButton->setText(tr("연결 해제"));
-        appendLog(QStringLiteral("INFO"), tr("연결됨: %1 / %2").arg(ui->driverCombo->currentText(), ui->portEdit->text()));
-    } else {
+        // 전송 중(Idle/Completed/Failed가 아닌 상태)에는 연결을 끊지 못하게 막음 —
+        // OtaSession이 ITransport&(참조)로 transport를 들고 있어서, 세션이 살아있는
+        // 채로 transport를 닫아버리면 이후 send()/recv() 호출이 닫힌 fd를 건드리게 됨.
+        if (m_session && m_session->state() != OtaSessionState::Idle
+            && m_session->state() != OtaSessionState::Completed
+            && m_session->state() != OtaSessionState::Failed) {
+            appendLog(QStringLiteral("WARN"),
+                      tr("전송이 진행 중입니다 — 완료/실패 후에 연결을 해제하세요"));
+            return;
+        }
+        m_session.reset();
+        if (m_transport)
+            m_transport->close();
+        m_transport.reset();
+
+        m_connected = false;
         ui->connectionStatusDot->setStyleSheet(QStringLiteral("background-color:#c0392b; border-radius:5px;"));
         ui->connectionStatusLabel->setText(tr("연결 안 됨"));
         ui->connectButton->setText(tr("연결"));
         appendLog(QStringLiteral("INFO"), tr("연결 해제됨"));
+        return;
     }
+
+    // driverCombo: 0="로컬 파일 (테스트용)", 1="CC1101 (/dev/cc1101)" (otamanager.ui 순서 그대로)
+    // 로컬 파일 백엔드(LocalFileTransport)는 아직 구현되지 않음(docs/roadmap.md
+    // 마일스톤 3 체크리스트 참고) — CC1101만 실제로 연결됨.
+    if (ui->driverCombo->currentIndex() != 1) {
+        appendLog(QStringLiteral("WARN"),
+                  tr("\"%1\" 드라이버는 아직 미구현입니다 — CC1101을 선택하세요")
+                      .arg(ui->driverCombo->currentText()));
+        return;
+    }
+
+    auto transport = std::make_unique<Cc1101Transport>(ui->portEdit->text().toStdString());
+    if (!transport->open()) {
+        appendLog(QStringLiteral("ERROR"),
+                  tr("CC1101 연결 실패: %1 (경로/권한을 확인하세요)").arg(ui->portEdit->text()));
+        return;
+    }
+    m_transport = std::move(transport);
+
+    m_connected = true;
+    ui->connectionStatusDot->setStyleSheet(QStringLiteral("background-color:#2ecc71; border-radius:5px;"));
+    ui->connectionStatusLabel->setText(tr("연결됨 (%1)").arg(ui->driverCombo->currentText()));
+    ui->connectButton->setText(tr("연결 해제"));
+    appendLog(QStringLiteral("INFO"), tr("연결됨: %1 / %2").arg(ui->driverCombo->currentText(), ui->portEdit->text()));
 }
 
 void OtaManager::onModeChanged()
 {
     ui->targetCombo->setEnabled(ui->unicastRadio->isChecked());
+    // 특정 기기 지정 전송은 DISCOVER 연동(기기 목록 → 실제 device_id 매핑) 후에나
+    // 가능함 — targetCombo가 지금은 "Node 01/02/03" 같은 자리표시자 문자열이라
+    // 실제 device_id로 못 바꿈. 진짜 막는 지점은 onStartClicked()에 있고, 여기선
+    // 미리 안내만 함
+    if (ui->unicastRadio->isChecked())
+        appendLog(QStringLiteral("WARN"),
+                  tr("유니캐스트는 DISCOVER 연동 전까지 실제 전송이 안 됩니다 — 지금은 브로드캐스트만 가능"));
 }
 
 void OtaManager::onSelectFileClicked()
@@ -151,19 +216,136 @@ void OtaManager::onChunkSizeChanged(int value)
 
 void OtaManager::onStartClicked()
 {
-    // TODO(마일스톤 3/4): 실제 BIN 분할·CRC 계산·재전송 큐 로직 연결
     if (m_selectedFilePath.isEmpty()) {
         appendLog(QStringLiteral("WARN"), tr("파일을 먼저 선택하세요"));
         return;
     }
+    if (!m_connected || !m_transport) {
+        appendLog(QStringLiteral("WARN"), tr("먼저 연결하세요"));
+        return;
+    }
+    if (m_session && m_session->state() != OtaSessionState::Idle
+        && m_session->state() != OtaSessionState::Completed
+        && m_session->state() != OtaSessionState::Failed) {
+        appendLog(QStringLiteral("WARN"), tr("이미 전송이 진행 중입니다"));
+        return;
+    }
+    // onModeChanged()에서 미리 경고했던 것과 같은 이유(targetCombo가 실제
+    // device_id로 못 바꾸는 자리표시자라서) — 여기가 실제로 막는 지점.
+    if (ui->unicastRadio->isChecked()) {
+        appendLog(QStringLiteral("WARN"),
+                  tr("특정 기기 지정 전송은 아직 지원되지 않습니다 — 브로드캐스트를 선택하세요"));
+        return;
+    }
+
+    m_retransmitEventCount = 0;
+    // otasession.h 67~72행 기본값(batchSize=5, timeoutMs=300, maxRetry=5,
+    // chunkDelayMs=40) 그대로 씀 — 전부 실기기 검증으로 확정된 값
+    // (docs/roadmap.md 3절)
+    m_session = std::make_unique<OtaSession>(*m_transport);
+    m_session->setOnStateChanged([this](OtaSessionState state) { handleSessionStateChanged(state); });
+
+    // OTA_BROADCAST_DEVICE_ID 고정 — 위에서 unicastRadio면 이미 막고 리턴했으므로
+    // 여기 도달했다는 건 broadcastRadio가 체크된 상태
+    if (!m_session->start(m_selectedFilePath.toStdString(), OTA_BROADCAST_DEVICE_ID)) {
+        appendLog(QStringLiteral("ERROR"),
+                  tr("전송 시작 실패: %1").arg(QString::fromStdString(m_session->errorMessage())));
+        m_session.reset();
+        return;
+    }
+
+    ui->startButton->setEnabled(false);
     ui->pauseButton->setEnabled(true);
-    appendLog(QStringLiteral("INFO"), tr("전송 시작 (분할/재전송 로직은 마일스톤 3~4에서 연결 예정)"));
+    ui->pauseButton->setText(tr("일시정지"));
+    appendLog(QStringLiteral("INFO"),
+              tr("전송 시작 (session_id=0x%1, %2)")
+                  .arg(QString::number(m_session->sessionId(), 16), m_selectedFilePath));
+    updateProgressUi();
 }
 
 void OtaManager::onPauseClicked()
 {
-    // TODO(마일스톤 4): 재전송 큐 일시정지/재개 로직 연결
-    appendLog(QStringLiteral("INFO"), tr("일시정지 (로직 연결 예정)"));
+    if (!m_session) {
+        appendLog(QStringLiteral("WARN"), tr("진행 중인 전송이 없습니다"));
+        return;
+    }
+    // pause()/resume() 둘 다 내부에서 setState()를 동기 호출하므로
+    // (otasession.cpp의 setState() 구현 참고), 버튼 텍스트·활성화 상태는 여기서
+    // 직접 안 바꾸고 handleSessionStateChanged()에 맡김 — 상태 하나만 보고
+    // 판단하는 곳을 하나로 유지하기 위함
+    if (m_session->state() == OtaSessionState::Paused)
+        m_session->resume(otaSessionNowMs());
+    else
+        m_session->pause(otaSessionNowMs());
+}
+
+void OtaManager::onSessionTick()
+{
+    if (!m_session)
+        return;
+    m_session->tick(otaSessionNowMs());
+    updateProgressUi();
+}
+
+void OtaManager::handleSessionStateChanged(OtaSessionState state)
+{
+    appendLog(QStringLiteral("INFO"),
+              tr("상태 변경: %1").arg(QString::fromUtf8(otaSessionStateName(state))));
+
+    // Retransmitting은 "슬롯 하나 재전송"마다 순간적으로 거쳐가는 상태라서
+    // (otasession.h 36~38행 주석 참고) 이 콜백이 불릴 때마다 카운트하면 곧
+    // 재전송 이벤트 수의 근사치가 됨 — 정확한 재시도 횟수(슬롯별 retryCount
+    // 합)는 progress()가 아직 안 담고 있어서 못 씀
+    if (state == OtaSessionState::Retransmitting)
+        ++m_retransmitEventCount;
+
+    switch (state) {
+    case OtaSessionState::Paused:
+        ui->pauseButton->setText(tr("재개"));
+        ui->pauseButton->setEnabled(true);
+        break;
+    case OtaSessionState::Completed:
+        appendLog(QStringLiteral("INFO"), tr("전송 완료"));
+        ui->startButton->setEnabled(true);
+        ui->pauseButton->setEnabled(false);
+        ui->pauseButton->setText(tr("일시정지"));
+        break;
+    case OtaSessionState::Failed:
+        appendLog(QStringLiteral("ERROR"),
+                  tr("전송 실패: %1")
+                      .arg(QString::fromStdString(m_session ? m_session->errorMessage() : std::string())));
+        ui->startButton->setEnabled(true);
+        ui->pauseButton->setEnabled(false);
+        ui->pauseButton->setText(tr("일시정지"));
+        break;
+    case OtaSessionState::Idle:
+        break;
+    default: // Handshaking/SendingBatch/WaitingBatchAck/Retransmitting/WaitingEndAck — 진행 중
+        ui->pauseButton->setText(tr("일시정지"));
+        ui->pauseButton->setEnabled(true);
+        ui->startButton->setEnabled(false);
+        break;
+    }
+
+    updateProgressUi();
+}
+
+void OtaManager::updateProgressUi()
+{
+    if (!m_session) {
+        ui->progressBar->setValue(0);
+        return;
+    }
+    const OtaSessionProgress p = m_session->progress();
+    ui->progressBar->setMaximum(static_cast<int>(p.totalChunks));
+    ui->progressBar->setValue(static_cast<int>(p.ackedChunks));
+    ui->ackStatusLabel->setText(tr("ACK %1 / %2 · 배치 %3/%4 · 재전송 %5회")
+                                     .arg(p.ackedChunks)
+                                     .arg(p.totalChunks)
+                                     .arg(p.currentBatchNumber)
+                                     .arg(p.totalBatches)
+                                     .arg(m_retransmitEventCount));
+    ui->progressStatusLabel->setText(QString::fromUtf8(otaSessionStateName(m_session->state())));
 }
 
 void OtaManager::onHopSeedRandomClicked()
