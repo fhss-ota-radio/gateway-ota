@@ -47,7 +47,32 @@
            <property name="placeholderText"><string>/dev/cc1101</string></property>
           </widget>
          </item>
+         <item row="2" column="0">
+          <widget class="QLabel" name="hopSeedLabel">
+           <property name="text"><string>호핑 난수 (FHSS seed)</string></property>
+          </widget>
+         </item>
+         <item row="2" column="1">
+          <layout class="QHBoxLayout" name="hopSeedLayout">
+           <item>
+            <widget class="QLineEdit" name="hopSeedEdit">
+             <property name="placeholderText"><string>숫자 입력 또는 무작위 생성 (0~4294967295)</string></property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QPushButton" name="hopSeedRandomButton">
+             <property name="text"><string>무작위 생성</string></property>
+            </widget>
+           </item>
+          </layout>
+         </item>
         </layout>
+       </item>
+       <item>
+        <widget class="QLabel" name="hopSeedHintLabel">
+         <property name="text"><string>※ 현재는 화면에 값만 입력/저장됩니다 — 라즈베리파이·ESP32 연동은 아직입니다.</string></property>
+         <property name="styleSheet"><string notr="true">color:#7f8c8d; font-size:11px;</string></property>
+        </widget>
        </item>
        <item>
         <layout class="QHBoxLayout" name="connectButtonLayout">

@@ -30,6 +30,7 @@ private slots:
     void onChunkSizeChanged(int value);
     void onStartClicked();
     void onPauseClicked();
+    void onHopSeedRandomClicked();
 
 private:
     void setupConnections();

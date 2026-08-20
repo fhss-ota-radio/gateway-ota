@@ -5,6 +5,9 @@
 #include <QDateTime>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QRandomGenerator>
+#include <QRegularExpression>
+#include <QRegularExpressionValidator>
 #include <QSettings>
 
 OtaManager::OtaManager(QWidget *parent)
@@ -38,6 +41,16 @@ void OtaManager::setupConnections()
     connect(ui->chunkSizeSpin, &QSpinBox::valueChanged, this, &OtaManager::onChunkSizeChanged);
     connect(ui->startButton, &QPushButton::clicked, this, &OtaManager::onStartClicked);
     connect(ui->pauseButton, &QPushButton::clicked, this, &OtaManager::onPauseClicked);
+    connect(ui->hopSeedRandomButton, &QPushButton::clicked, this, &OtaManager::onHopSeedRandomClicked);
+
+    // 호핑 난수(FHSS seed)는 uint32_t(0~4294967295) 범위라 QIntValidator(int
+    // 범위, ~21억까지)로는 못 담아서 QRegularExpressionValidator로 숫자만
+    // 입력되게 막고(최대 10자리), 실제 범위 초과 여부는 쓰는 시점(현재는
+    // onHopSeedRandomClicked()뿐, 나중에 파이/ESP32 연동 시 여기서 같이 검사)에
+    // 확인하는 방식으로 함 — kernel-cc1101-spi의 cc1101_fhss_hop_policy.seed와
+    // 같은 타입(uint32_t)에 맞춘 것 (조사 결과는 디자인노트 참고)
+    auto *hopSeedValidator = new QRegularExpressionValidator(QRegularExpression(QStringLiteral("[0-9]{0,10}")), this);
+    ui->hopSeedEdit->setValidator(hopSeedValidator);
 }
 
 void OtaManager::loadSettings()
@@ -48,6 +61,9 @@ void OtaManager::loadSettings()
     const int driverIndex = settings.value(QStringLiteral("transport/driverIndex"), 0).toInt();
     const int chunkSize = settings.value(QStringLiteral("file/chunkSize"), 48).toInt(); // ota-protocol OTA_MAX_PAYLOAD_SIZE (v0.2, 2026-08-11 갱신)
     const bool broadcast = settings.value(QStringLiteral("target/broadcast"), false).toBool();
+    // 기본값 없음(빈 문자열) — 코드에 시드를 하드코딩하지 않기 위해서.
+    // 사용자가 직접 입력하거나 "무작위 생성"으로 채워야 함
+    const QString hopSeed = settings.value(QStringLiteral("fhss/hopSeed"), QString()).toString();
 
     ui->portEdit->setText(port);
     if (driverIndex >= 0 && driverIndex < ui->driverCombo->count())
@@ -57,6 +73,7 @@ void OtaManager::loadSettings()
         ui->broadcastRadio->setChecked(true);
     else
         ui->unicastRadio->setChecked(true);
+    ui->hopSeedEdit->setText(hopSeed);
 }
 
 void OtaManager::saveSettings()
@@ -66,6 +83,7 @@ void OtaManager::saveSettings()
     settings.setValue(QStringLiteral("transport/driverIndex"), ui->driverCombo->currentIndex());
     settings.setValue(QStringLiteral("file/chunkSize"), ui->chunkSizeSpin->value());
     settings.setValue(QStringLiteral("target/broadcast"), ui->broadcastRadio->isChecked());
+    settings.setValue(QStringLiteral("fhss/hopSeed"), ui->hopSeedEdit->text());
 }
 
 void OtaManager::appendLog(const QString &tag, const QString &message)
@@ -146,4 +164,22 @@ void OtaManager::onPauseClicked()
 {
     // TODO(마일스톤 4): 재전송 큐 일시정지/재개 로직 연결
     appendLog(QStringLiteral("INFO"), tr("일시정지 (로직 연결 예정)"));
+}
+
+void OtaManager::onHopSeedRandomClicked()
+{
+    // QRandomGenerator::global()이 uint32_t 그대로인 quint32를 뽑아주므로
+    // kernel-cc1101-spi의 cc1101_fhss_hop_policy.seed(uint32_t)와 범위가
+    // 정확히 맞음 — 나중에 실제로 파이/ESP32에 넘길 때 값 변환이 필요 없음.
+    //
+    // TODO(다음 단계): 지금은 화면에만 값을 채우고 끝 — 실제로 라즈베리파이
+    // CC1101 드라이버(ioctl CC1101_IOC_FHSS_SET_CONFIG, kernel-cc1101-spi/
+    // cc1101_hop.c)에 넘기거나 ESP32로 전달하는 연동은 아직 없음. ESP32
+    // 쪽은 현재 시드 개념 자체가 없어서(순차 채널 배열만 하드코딩, 담당자
+    // 문서에 "시드 기반 셔플은 미구현"이라고 명시) 프로토콜 확장이 먼저
+    // 필요함 — 자세한 조사 내용은
+    // docs/note/design-notes-gateway-ota-es.md 참고
+    const quint32 seed = QRandomGenerator::global()->generate();
+    ui->hopSeedEdit->setText(QString::number(seed));
+    appendLog(QStringLiteral("INFO"), tr("호핑 난수 무작위 생성: %1").arg(seed));
 }
