@@ -1,0 +1,5 @@
+[discover] OTA_DISCOVER 브로드캐스트 전송, 1000ms 동안 응답 대기...
+[discover] (ESP32가 MENU_OTA 화면에 있어야 응답합니다)
+[discover] 1대 발견:
+  - device_id=A2-9E-60 fw=0.1.0
+[discover] 종료
