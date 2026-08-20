@@ -208,6 +208,17 @@ target_link_libraries(ota_smoke_discover
         ota_core
 )
 
+# DISCOVER -> explicit device selection -> targeted OtaSession START/DATA/END.
+# Hardware-only and bounded by the CLI's max_session_ms argument, so it is not
+# registered with ctest.
+add_executable(ota_smoke_discover_session_send
+    tests/smoke_discover_session_send_main.cpp
+)
+target_link_libraries(ota_smoke_discover_session_send
+    PRIVATE
+        ota_core
+)
+
 # ---------- tools/spidev: 진단 도구 (제품 코드 아님) ----------
 # SpidevTransport는 커널 드라이버(/dev/cc1101)를 우회해서 /dev/spidevX.Y로 CC1101을
 # 직접 폴링하는 ITransport 구현체입니다. "안 되는 원인이 하드웨어냐 커널이냐"를
