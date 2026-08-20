@@ -208,12 +208,27 @@ void OtaSession::enterSendingBatch(int64_t nowMs)
     // 아니라 고정 크기 배치를 한꺼번에 다 쏘는 방식 (fsm-design.md §6).
     // 중간에 개별 ACK를 "기다리지"는 않지만(그러면 배치 방식 자체가 무의미),
     // 아래처럼 짧은 간격으로 폴링은 한다 — 이유는 바로 아래 주석.
+    // [버그 수정 2026-08-20] 예전에는 배치 안 모든 슬롯의 sentAtMs를 배치
+    // 시작 시각(nowMs) 하나로 통일해서 찍었다. 그런데 실제로는 슬롯마다
+    // chunkDelayMs(예: 40ms)씩 늦게 전송되므로, 배치 끝쪽 슬롯일수록
+    // "실제 보낸 시각"과 "기록된 sentAtMs" 사이 오차가 커진다(마지막
+    // 슬롯은 최대 (batchSize-1)*chunkDelayMs만큼 일찍 찍힘). 이 오차만큼
+    // tickWaitingBatchAck()의 타임아웃 판정(nowMs - slot.sentAtMs >
+    // m_timeoutMs)이 실제보다 일찍 만료된 것으로 오판해서, 응답이 아직
+    // 오는 중인데도 불필요하게 재전송했다 — ESP32 담당자가 실기기
+    // 테스트로 찾아냄. currentMs를 슬롯마다 실제로 쉰 만큼(step)
+    // 전진시켜서 각 슬롯의 sentAtMs가 "그 슬롯을 진짜로 보낸 시각"을
+    // 반영하게 한다. 시스템 시계(otaSessionNowMs())를 안 쓰고 nowMs
+    // 기준 논리 시계를 계속 쓰는 이유는 pollDuringDelay() 주석 참고 —
+    // 유닛테스트가 가짜 nowMs로 타임아웃을 검증하는 구조를 깨지 않기
+    // 위함.
+    int64_t currentMs = nowMs;
     for (auto &slot : m_batch) {
         if (!m_transport.send(slot.packet)) {
             fail("OTA_DATA 전송 실패 (sequence=" + std::to_string(slot.sequence) + ")");
             return;
         }
-        slot.sentAtMs = nowMs;
+        slot.sentAtMs = currentMs;
 
         // [효율 개선 2026-08-19] 예전에는 여기서 그냥 sleep_for(chunkDelayMs)만
         // 하고 recv()를 전혀 안 불렀다. 그런데 수신측은 DATA를 받자마자 바로
@@ -231,17 +246,8 @@ void OtaSession::enterSendingBatch(int64_t nowMs)
         // 맞아떨어진다. chunkDelayMs를 짧은 간격(kPollIntervalMs)으로
         // 쪼개서 그 사이사이 recv()를 폴링하면, 이미 도착한 ACK를 놓치지
         // 않고 바로 반영해서 불필요한 재전송을 줄일 수 있다.
-        if (m_chunkDelayMs > 0) {
-            constexpr int kPollIntervalMs = 5;
-            int remainingMs = m_chunkDelayMs;
-            while (remainingMs > 0) {
-                const int step = std::min(remainingMs, kPollIntervalMs);
-                std::this_thread::sleep_for(std::chrono::milliseconds(step));
-                remainingMs -= step;
-                if (!pollAndApplyAckOrNack(nowMs))
-                    return; // fail() 처리됨 — 배치 나머지 전송 중단
-            }
-        }
+        if (!pollDuringDelay(&currentMs))
+            return; // fail() 처리됨 — 배치 나머지 전송 중단
     }
 
     // [2026-08-19 추가했다가 같은 날 되돌림] 배치 전송 직후 flushRx()를
@@ -276,8 +282,17 @@ bool OtaSession::retransmitSlot(BatchSlot &slot, int64_t nowMs)
     // enterSendingBatch()는 청크 사이에 chunkDelayMs를 넣는데 여기만 빠져
     // 있었다 — 그래서 재전송이 쉬는 시간 없이 붙어 나갔고, 반이중인 CC1101이
     // 그동안 돌아온 ACK를 못 들었다(위 tickWaitingBatchAck() 주석 참고).
-    if (m_chunkDelayMs > 0)
-        std::this_thread::sleep_for(std::chrono::milliseconds(m_chunkDelayMs));
+    //
+    // [버그 수정 2026-08-20] 위 sleep_for()만 있고 recv() 폴링이 없었다 —
+    // enterSendingBatch()는 2026-08-19에 이미 폴링을 넣었는데(위 주석) 이
+    // 재전송 경로엔 그 수정이 빠져 있었다. ESP32 담당자가 실기기 테스트로
+    // 찾아냄: 재전송한 DATA에 대한 ACK/NACK이 바로 도착해도 이 sleep
+    // 구간 동안은 못 듣고 흘려보내서, 다음 tick의 타임아웃에서야(최악
+    // m_timeoutMs만큼 늦게) 반영됐다. enterSendingBatch()와 같은
+    // pollDuringDelay()를 재사용해서 여기도 5ms 간격으로 폴링하도록 맞춘다.
+    int64_t currentMs = nowMs;
+    if (!pollDuringDelay(&currentMs))
+        return false; // fail() 처리됨 (폴링 중 다른 슬롯이 재전송 한도 초과)
 
     setState(OtaSessionState::WaitingBatchAck);
     return true;
@@ -305,6 +320,39 @@ bool OtaSession::pollAndApplyAckOrNack(int64_t nowMs)
             }
             break;
         }
+    }
+    return true;
+}
+
+bool OtaSession::pollDuringDelay(int64_t *nowMs)
+{
+    if (m_chunkDelayMs <= 0)
+        return true;
+
+    // [2026-08-20 추가] enterSendingBatch()와 retransmitSlot() 둘 다 쓰던
+    // "5ms 간격 쪼개기 + 폴링" 로직을 여기 하나로 합쳤다(예전엔
+    // enterSendingBatch()에만 있고 retransmitSlot()엔 없어서 버그였다 —
+    // 위 retransmitSlot() 주석 참고).
+    //
+    // *nowMs를 실제로 잠든 만큼(step)만 전진시키는 이유: 여기서
+    // otaSessionNowMs()(진짜 시스템 시계)를 부르면 더 "정확"해 보이지만,
+    // 유닛테스트는 tick()에 작은 가짜 정수(예: 1010)를 nowMs로 넘겨서
+    // sleep 없이 타임아웃 로직을 검증하는 구조다. 여기서 진짜 시계를
+    // 섞으면 tickWaitingBatchAck()의 `nowMs - slot.sentAtMs` 계산이
+    // (가짜 nowMs) - (진짜 큰 시스템 시각)처럼 뒤섞여서 타임아웃 판정이
+    // 깨진다. 그래서 "호출한 쪽이 준 시간 기준을 그대로 유지한 채, 실제
+    // 잠든 시간(ms)만큼만 더한다" — 진짜 하드웨어에서는 이 값이 곧
+    // 실제 흐른 시간과 같고, 테스트에서는 가짜 기준 위에서 논리적으로
+    // 같은 양만큼만 전진하므로 두 쪽 다 옳게 동작한다.
+    constexpr int kPollIntervalMs = 5;
+    int remainingMs = m_chunkDelayMs;
+    while (remainingMs > 0) {
+        const int step = std::min(remainingMs, kPollIntervalMs);
+        std::this_thread::sleep_for(std::chrono::milliseconds(step));
+        remainingMs -= step;
+        *nowMs += step;
+        if (!pollAndApplyAckOrNack(*nowMs))
+            return false; // fail() 처리됨
     }
     return true;
 }

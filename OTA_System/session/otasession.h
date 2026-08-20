@@ -163,6 +163,17 @@ private:
     // 처리를 즉시 중단해야 한다.
     bool pollAndApplyAckOrNack(int64_t nowMs);
 
+    // chunkDelayMs만큼 5ms 간격으로 쪼개 폴링하며 대기한다. *nowMs를 실제로
+    // 잠든 만큼(step)만 전진시켜서, 대기 중 poll로 다른 슬롯이 재전송되면
+    // 그 슬롯의 sentAtMs도 "그 시점의 진짜 지금"을 반영하게 한다 — 진짜
+    // 시스템 시계(otaSessionNowMs())를 쓰지 않는 이유는, 유닛테스트가
+    // tick()에 넘기는 가짜(논리) nowMs 값으로 타임아웃을 검증하는 구조라서
+    // 여기서 실제 시계를 섞으면 그 타임아웃 계산이 깨지기 때문이다.
+    // enterSendingBatch()(최초 전송 사이 대기)와 retransmitSlot()(재전송
+    // 직후 대기, 2026-08-20 추가)이 이 로직을 공유한다.
+    // 재전송 한도 초과로 fail()이 호출됐으면 false를 반환한다.
+    bool pollDuringDelay(int64_t *nowMs);
+
     void enterWaitingEndAck(int64_t nowMs);
     void tickWaitingEndAck(int64_t nowMs);
     void sendEndPacket();

@@ -369,6 +369,100 @@ void batchSendingPollsAlreadyArrivedAckDuringSend()
     std::cout << "[OK] batchSendingPollsAlreadyArrivedAckDuringSend\n";
 }
 
+// [버그 수정 2026-08-20, ESP32 담당자 실기기 테스트로 발견] retransmitSlot()이
+// 재전송 직후 sleep_for(chunkDelayMs)만 하고 enterSendingBatch()와 달리
+// recv()를 폴링하지 않던 버그 재현. NACK으로 재전송을 유발하면서, 그
+// 재전송분에 대한 ACK을 미리 큐에 넣어 둔다 — 옛 코드였다면 이 ACK은
+// retransmitSlot()의 sleep 구간엔 못 읽혀서 이 tick()이 끝난 시점엔 아직
+// ackedChunks==0이었을 것(다음 tick의 최상단 폴링에서야 반영). 수정 후엔
+// 재전송 직후 폴링 구간 안에서 같은 tick() 호출 중에 바로 소비된다.
+void retransmitSlotPollsForResponseDuringItsOwnDelay()
+{
+    const std::string path = writeTempFile("os_retxpoll.bin", repeat('J', 48 + 10)); // 2청크
+    constexpr uint32_t kSessionId = 0xAAAAAAAAu;
+
+    FakeTransport transport;
+    // chunkDelayMs=10 (내부 폴링 간격 5ms 기준 재전송 후 2번 폴링 기회) —
+    // 2청크/batchSize=2로 해서 seq1이 남아있는 채로 WaitingBatchAck에
+    // 머무는지까지 같이 확인한다.
+    OtaSession session(transport, /*batchSize=*/2, /*timeoutMs=*/300, /*maxRetry=*/5,
+                        /*chunkDelayMs=*/10);
+
+    session.start(path, 1, kSessionId, 1000);
+    transport.rxQueue.push_back(
+        makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_START, OTA_CONTROL_SEQUENCE));
+    session.tick(1010); // seq0,seq1 최초 전송 -> WaitingBatchAck
+    assert(transport.countSentOfType(OTA_PKT_DATA) == 2);
+
+    // seq0 NACK과, 재전송분에 대한 ACK을 순서대로 큐에 넣음 — 같은 tick()
+    // 안에서 NACK 처리(재전송) -> 재전송 직후 폴링 구간에서 이 ACK까지
+    // 바로 소비되는 게 기대 동작.
+    transport.rxQueue.push_back(
+        makeAckOrNack(OTA_PKT_NACK, kSessionId, OTA_PKT_DATA, 0, OTA_RESULT_INVALID_CRC));
+    transport.rxQueue.push_back(makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_DATA, 0));
+
+    session.tick(1020);
+    assert(transport.countSentOfType(OTA_PKT_DATA) == 3); // seq0 재전송 1회 추가
+    assert(session.progress().ackedChunks == 1); // 재전송 직후 폴링에서 바로 반영돼야 함
+    assert(session.state() == OtaSessionState::WaitingBatchAck); // seq1은 아직 응답 대기 중
+
+    // 나머지도 정상 진행되는지(잔여 로직 안 깨졌는지) 확인
+    transport.rxQueue.push_back(makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_DATA, 1));
+    session.tick(1030);
+    assert(session.state() == OtaSessionState::WaitingEndAck);
+
+    std::remove(path.c_str());
+    std::cout << "[OK] retransmitSlotPollsForResponseDuringItsOwnDelay\n";
+}
+
+// [버그 수정 2026-08-20, ESP32 담당자 실기기 테스트로 발견] enterSendingBatch()가
+// 배치 안 모든 슬롯의 sentAtMs를 배치 "시작" 시각(nowMs 파라미터) 하나로
+// 통일해서 찍던 버그 재현. slot0은 곧바로 ACK되게 하고, slot1은 응답 없이
+// 놔둔 채 "slot1이 실제로 보내진 시각(진입 시각 + chunkDelayMs) 기준으로는
+// 아직 타임아웃 전이지만, 옛 버그(배치 진입 시각 기준)로 계산하면 이미
+// 타임아웃"인 nowMs를 골라서 tick()했을 때 불필요한 재전송이 안 나가는지
+// 확인한다. 옛 코드였다면 이 tick에서 DATA가 한 번 더(3번째) 나갔을 것.
+void batchSlotsGetIndividualSentAtMsNotSharedBatchStart()
+{
+    const std::string path = writeTempFile("os_slotstamp.bin", repeat('K', 48 + 10)); // 2청크
+    constexpr uint32_t kSessionId = 0xBBBBBBBBu;
+
+    FakeTransport transport;
+    // chunkDelayMs=40 -> slot1은 배치 진입보다 실제로 ~40ms 늦게 나감.
+    // timeoutMs=50으로 잡아서 "배치 진입 시각 기준(버그)"과 "slot1 실제
+    // 전송 시각 기준(정상)" 사이 폭에서 둘의 타임아웃 판정이 갈리게 한다.
+    OtaSession session(transport, /*batchSize=*/2, /*timeoutMs=*/50, /*maxRetry=*/5,
+                        /*chunkDelayMs=*/40);
+
+    session.start(path, 1, kSessionId, /*nowMs=*/1000);
+    transport.rxQueue.push_back(
+        makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_START, OTA_CONTROL_SEQUENCE));
+
+    session.tick(1010); // Handshaking -> SendingBatch(slot0@1010, slot1@~1050) -> WaitingBatchAck
+    assert(session.state() == OtaSessionState::WaitingBatchAck);
+    assert(transport.countSentOfType(OTA_PKT_DATA) == 2); // seq0, seq1 최초 전송만
+
+    // slot0(seq0)만 ACK
+    transport.rxQueue.push_back(makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_DATA, 0));
+    session.tick(1050);
+    assert(session.progress().ackedChunks == 1);
+
+    // slot1(seq1)은 응답 없음. nowMs=1080: slot1의 "실제" 전송 시각(~1050)
+    // 기준으로는 30ms만 지나 타임아웃(50ms) 전이지만, 옛 버그의 "배치 진입
+    // 시각(1010)" 기준으로는 70ms 지나 이미 타임아웃이었을 시점.
+    session.tick(1080);
+    assert(session.state() == OtaSessionState::WaitingBatchAck);
+    assert(transport.countSentOfType(OTA_PKT_DATA) == 2); // 아직 재전송 없어야 함(수정 후)
+
+    // 이제 정상적으로 응답 -> 완료 진행 확인(잔여 로직 안 깨졌는지)
+    transport.rxQueue.push_back(makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_DATA, 1));
+    session.tick(1090);
+    assert(session.state() == OtaSessionState::WaitingEndAck);
+
+    std::remove(path.c_str());
+    std::cout << "[OK] batchSlotsGetIndividualSentAtMsNotSharedBatchStart\n";
+}
+
 } // namespace
 
 int main()
@@ -381,6 +475,8 @@ int main()
     endNackGoesDirectlyToFailedWithoutRetry();
     resumeDoesNotCauseSpuriousTimeout();
     batchSendingPollsAlreadyArrivedAckDuringSend();
+    retransmitSlotPollsForResponseDuringItsOwnDelay();
+    batchSlotsGetIndividualSentAtMsNotSharedBatchStart();
     std::cout << "\n모든 테스트 통과\n";
     return 0;
 }
