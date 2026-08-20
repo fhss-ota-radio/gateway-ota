@@ -79,7 +79,7 @@ void printUsage(const char *program)
            " [batch_size] [chunk_delay_ms] [max_session_ms]\n"
         << "  device_id_hex omitted: exactly one discovered device is required\n"
         << "  broadcast ffffffff is intentionally rejected\n"
-        << "  defaults: discover_wait_ms=1000 batch_size=5 chunk_delay_ms=40"
+        << "  defaults: discover_wait_ms=1000 batch_size=5 chunk_delay_ms=300"
            " max_session_ms=120000\n";
 }
 
@@ -103,7 +103,9 @@ int main(int argc, char *argv[])
 
     int discoverWaitMs = 1000;
     int batchSize = 5;
-    int chunkDelayMs = 40;
+    // ESP32 uses one half-duplex radio owner and completes each ACK TX before
+    // re-arming RX. Leave one full ACK/TX/RX budget between DATA packets.
+    int chunkDelayMs = 300;
     int maxSessionMs = 120000;
     if ((argc >= 5 && !parsePositiveInt(argv[4], &discoverWaitMs)) ||
         (argc >= 6 && !parsePositiveInt(argv[5], &batchSize)) ||
