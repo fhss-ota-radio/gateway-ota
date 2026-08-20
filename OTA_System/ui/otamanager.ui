@@ -22,13 +22,12 @@
    <string>OTA Manager</string>
   </property>
   <widget class="QWidget" name="centralwidget">
-   <layout class="QHBoxLayout" name="rootLayout">
+   <layout class="QHBoxLayout" name="rootLayout" stretch="0,1">
     <property name="leftMargin"><number>16</number></property>
     <property name="topMargin"><number>16</number></property>
     <property name="rightMargin"><number>16</number></property>
     <property name="bottomMargin"><number>16</number></property>
     <property name="spacing"><number>12</number></property>
-    <property name="stretch"><string notr="true">0,1</string></property>
     <item>
      <layout class="QVBoxLayout" name="leftColumnLayout">
       <property name="spacing"><number>12</number></property>
@@ -245,9 +244,8 @@
      </layout>
     </item>
     <item>
-     <layout class="QVBoxLayout" name="rightColumnLayout">
+     <layout class="QVBoxLayout" name="rightColumnLayout" stretch="0,1">
       <property name="spacing"><number>12</number></property>
-      <property name="stretch"><string notr="true">0,1</string></property>
       <item>
        <widget class="QGroupBox" name="progressGroup">
         <property name="title"><string>전송 진행률</string></property>
