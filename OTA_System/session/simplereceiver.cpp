@@ -82,6 +82,9 @@ ReceivedPacket tryReceiveOnce(ITransport &transport)
             return result;
         result.kind = ReceivedPacketKind::DiscoverAck;
         result.deviceId = fields.device_id;
+        result.fwMajor = fields.fw_major;
+        result.fwMinor = fields.fw_minor;
+        result.fwPatch = fields.fw_patch;
         break;
     }
     default:

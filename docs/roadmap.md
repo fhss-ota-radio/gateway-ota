@@ -176,9 +176,18 @@
       수신 확인 — 수신측 로그에서도 `NACK(CRC 오류) 전송함`/`NACK(순서
       오류) 전송함`이 그대로 찍힘. 와이어 레벨에서 ACK와 다른 진짜 NACK
       타입 패킷이 왕복하는 것까지 실기기로 완전히 확인됨.
-- [ ] `DISCOVER`/`DISCOVER_ACK` 기반 기기 탐색 흐름 — 프로토콜 레벨 타입/인코딩은
-      `ota-protocol`에 이미 있음, `gateway-ota` 쪽 사용 로직은 미착수.
-      `OtaSession`은 의도적으로 이 부분을 포함하지 않음(아래 참고)
+- [ ] `DISCOVER`/`DISCOVER_ACK` 기반 기기 탐색 흐름 — **구현 진행 중
+      (2026-08-20)**. `session/discovery.h/.cpp`에 `discoverDevices()`
+      추가 — `OTA_DISCOVER`를 한 번 브로드캐스트하고 `waitMs`(기본
+      1000ms) 동안 도착하는 `DISCOVER_ACK`들을 device_id 기준으로
+      중복 제거해 모아서 반환. `OtaSession`은 의도적으로 이 부분을
+      포함하지 않음(아래 참고) — `discoverDevices()`도 같은 이유로
+      별도 파일. 구현 중 `simplereceiver.h`의 `ReceivedPacket`에
+      `fwMajor`/`fwMinor`/`fwPatch` 필드가 빠져 있던 걸 발견해 같이
+      추가(`tryReceiveOnce()`가 `DISCOVER_ACK`의 버전 필드를 지금까지
+      조용히 버리고 있었음). 유닛테스트(`tests/tst_discovery.cpp`) 5개
+      작성 완료, 샌드박스 컴파일 검증은 진행 중 — ESP32가 자리를 비운
+      동안 미리 준비해 두는 작업(실기기 검증은 ESP32 복귀 후)
 - [ ] `otamanager.cpp`(화면)에 실제 전송 로직 연결 — 미착수
 
 #### 실기기 검증에서 찾은 버그 — 재전송 버스트 (2026-08-19 수정)

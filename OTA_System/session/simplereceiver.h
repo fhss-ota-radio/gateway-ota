@@ -38,6 +38,9 @@ struct ReceivedPacket
     uint8_t  payloadLength = 0;      // Data
     uint8_t  resultCode = 0;         // Ack/Nack
     uint32_t deviceId = 0;           // DiscoverAck
+    uint8_t  fwMajor = 0;            // DiscoverAck
+    uint8_t  fwMinor = 0;            // DiscoverAck
+    uint8_t  fwPatch = 0;            // DiscoverAck
     uint8_t  imageSha256[32] = {};   // Start — 송신측이 OtaSession::start()에서
                                       // 계산해 보낸 값 그대로. 수신측이 재조립
                                       // 완료 후 자체적으로 계산한 해시와 비교하면

@@ -58,6 +58,8 @@ add_library(ota_core STATIC
     session/simplereceiver.cpp
     session/otasession.h
     session/otasession.cpp
+    session/discovery.h
+    session/discovery.cpp
     transport/itransport.h
     transport/cc1101_status.h
     transport/cc1101transport.h
@@ -140,6 +142,18 @@ target_link_libraries(ota_receiver_tests
 )
 add_test(NAME ota_receiver_tests COMMAND ota_receiver_tests)
 
+# ---------- ota_discovery_tests: discoverDevices() (DISCOVER/DISCOVER_ACK) 검증 ----------
+# 2026-08-20 착수. FakeTransport(인메모리)로 실기기 없이 조회/중복제거/무응답
+# 시나리오를 검증 — ota_session_tests와 같은 패턴.
+add_executable(ota_discovery_tests
+    tests/tst_discovery.cpp
+)
+target_link_libraries(ota_discovery_tests
+    PRIVATE
+        ota_core
+)
+add_test(NAME ota_discovery_tests COMMAND ota_discovery_tests)
+
 # ---------- ota_smoke_send / ota_smoke_recv: 실기기(CC1101) 스모크테스트용 CLI ----------
 # /dev/cc1101이 실제로 있어야 동작하는 수동 실행 도구라서 add_test()에는 등록하지
 # 않음 — ctest(자동 빌드 검증)에는 안 끼고, 실기기 앞에서 사람이 직접 실행.
@@ -179,6 +193,17 @@ add_executable(ota_smoke_bad_data
     tests/smoke_bad_data_main.cpp
 )
 target_link_libraries(ota_smoke_bad_data
+    PRIVATE
+        ota_core
+)
+
+# discoverDevices()(session/discovery.h)로 실제 ESP32를 조회해보는 CLI —
+# 2026-08-20. ESP32가 MENU_OTA 화면일 때만 DISCOVER_ACK로 응답한다
+# (firmware-esp32의 ota_consumer_is_ota_mode() 조건).
+add_executable(ota_smoke_discover
+    tests/smoke_discover_main.cpp
+)
+target_link_libraries(ota_smoke_discover
     PRIVATE
         ota_core
 )
