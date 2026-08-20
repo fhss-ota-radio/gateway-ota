@@ -38,6 +38,15 @@ struct ReceivedPacket
     uint8_t  payloadLength = 0;      // Data
     uint8_t  resultCode = 0;         // Ack/Nack
     uint32_t deviceId = 0;           // DiscoverAck
+    uint8_t  fwMajor = 0;            // DiscoverAck
+    uint8_t  fwMinor = 0;            // DiscoverAck
+    uint8_t  fwPatch = 0;            // DiscoverAck
+    uint8_t  imageSha256[32] = {};   // Start — 송신측이 OtaSession::start()에서
+                                      // 계산해 보낸 값 그대로. 수신측이 재조립
+                                      // 완료 후 자체적으로 계산한 해시와 비교하면
+                                      // (ESP32의 ota_writer_finish()가 하는 것과
+                                      // 같은 검증을) sha256sum을 손으로 안 돌려도
+                                      // 자동으로 확인할 수 있다.
 };
 
 // transport.recv()를 논블로킹(non-blocking, 데이터가 없어도 기다리지 않고
@@ -59,5 +68,15 @@ ReceivedPacket tryReceiveOnce(ITransport &transport);
 // 타입에 직접 의존하지 않도록 하기 위함). 기본값 0은 OTA_RESULT_OK와 같음.
 bool sendAckFor(ITransport &transport, const ReceivedPacket &packet,
                  uint8_t resultCode = 0 /* OTA_RESULT_OK */);
+
+// OTA_DATA 패킷의 헤더(session_id, sequence)만 다시 읽는다. 정상 decode
+// 경로(tryReceiveOnce)와 달리 CRC 검증을 하지 않으므로, CRC가 깨진 DATA도
+// "어떤 세션의 몇 번 청크였는지"는 알아낼 수 있다 — CRC 오류 NACK을 보낼 때
+// 이 정보가 필요하다(안 그러면 그냥 버리는 것과 재전송 유도를 구분할 수 없음).
+//
+// raw가 OTA_DATA 타입이 아니거나 헤더 길이(OTA_DATA_HEADER_SIZE)보다 짧으면
+// false — 그 경우 sessionId/sequence는 건드리지 않는다.
+bool peekDataHeaderForNack(const std::vector<uint8_t> &raw, uint32_t *sessionId,
+                            uint32_t *sequence);
 
 #endif // SIMPLERECEIVER_H

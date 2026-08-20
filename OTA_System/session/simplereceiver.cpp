@@ -2,6 +2,8 @@
 
 #include "itransport.h"
 
+#include <cstring>
+
 extern "C" {
 #include "ota_protocol.h"
 }
@@ -30,6 +32,9 @@ ReceivedPacket tryReceiveOnce(ITransport &transport)
         result.targetDeviceId = fields.target_device_id;
         result.imageSize = fields.image_size;
         result.totalChunks = fields.total_chunks;
+        static_assert(sizeof(result.imageSha256) == sizeof(fields.image_sha256),
+                      "ReceivedPacket.imageSha256 크기가 ota_start_fields_t와 다릅니다");
+        std::memcpy(result.imageSha256, fields.image_sha256, sizeof(result.imageSha256));
         break;
     }
     case OTA_PKT_DATA: {
@@ -77,6 +82,9 @@ ReceivedPacket tryReceiveOnce(ITransport &transport)
             return result;
         result.kind = ReceivedPacketKind::DiscoverAck;
         result.deviceId = fields.device_id;
+        result.fwMajor = fields.fw_major;
+        result.fwMinor = fields.fw_minor;
+        result.fwPatch = fields.fw_patch;
         break;
     }
     default:
@@ -117,11 +125,45 @@ bool sendAckFor(ITransport &transport, const ReceivedPacket &packet, uint8_t res
     fields.sequence = sequence;
     fields.result_code = resultCode;
 
+    // [버그 수정 2026-08-19] resultCode가 OTA_RESULT_OK가 아니면 실제로
+    // OTA_NACK 타입으로 보낸다. 수신측(OtaSession::pollAndApplyAckOrNack())은
+    // tryReceiveOnce()가 매긴 kind(Ack/Nack — 와이어의 type byte로만 결정됨,
+    // ota_protocol.h 참고)를 보고 재전송 여부를 판단하는데, 지금까지 이
+    // 함수는 resultCode 값과 상관없이 무조건 OTA_PKT_ACK로만 인코딩하고
+    // 있었다. 우연히 sendStartPacket 쪽 ok 판정이 "kind==Ack && resultCode==
+    // OK" 둘 다 확인해서 동작 자체는 어쩌다 맞았지만(resultCode!=OK면
+    // ok=false로 떨어져 재전송은 됨), 와이어에는 진짜 NACK 타입 패킷이
+    // 한 번도 안 나간 상태였다 — "NACK 경로는 시뮬레이션으로만 검증됨"
+    // (docs/roadmap.md)의 근본 원인이 바로 이거였다.
+    const ota_packet_type_t wireType = (resultCode == static_cast<uint8_t>(OTA_RESULT_OK))
+        ? OTA_PKT_ACK
+        : OTA_PKT_NACK;
+
     uint8_t buffer[OTA_ACK_PACKET_SIZE];
     const size_t written =
-        ota_protocol_encode_ack(buffer, sizeof(buffer), OTA_PKT_ACK, &fields);
+        ota_protocol_encode_ack(buffer, sizeof(buffer), wireType, &fields);
     if (written == 0)
         return false;
 
     return transport.send(std::vector<uint8_t>(buffer, buffer + written));
+}
+
+bool peekDataHeaderForNack(const std::vector<uint8_t> &raw, uint32_t *sessionId,
+                            uint32_t *sequence)
+{
+    // ota_protocol_decode_data()는 CRC 불일치면 통째로 실패(false)라서
+    // session_id/sequence조차 꺼낼 수 없다 — 그런데 CRC 검사는 payload에만
+    // 걸리고(ota_protocol.h 208행 주석 참고) 헤더 자체는 그 대상이 아니므로,
+    // 헤더 바이트는 CRC 결과와 무관하게 그대로 읽어도 안전하다. "이 청크가
+    // 깨졌다"는 NACK을 보낼 때 "어떤 청크였는지"를 알려면 이게 필요하다 —
+    // 안 그러면 그냥 조용히 버리는 수밖에 없다(송신측은 타임아웃까지
+    // 기다려야 재전송함).
+    if (raw.size() < OTA_DATA_HEADER_SIZE)
+        return false;
+    if (raw[0] != static_cast<uint8_t>(OTA_PKT_DATA))
+        return false;
+
+    if (sessionId) *sessionId = ota_read_u32_le(&raw[1]);
+    if (sequence) *sequence = ota_read_u32_le(&raw[5]);
+    return true;
 }

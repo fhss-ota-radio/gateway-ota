@@ -18,7 +18,7 @@
 | 1 | Qt 프로젝트 세팅 및 화면 뼈대 | ✅ 완료 |
 | 2 | 전송 계층 추상화 (`ITransport`) + `Cc1101Transport` 실구현 | ✅ **완료 (2026-08-16 실기기 검증 통과, 1067/1067)** |
 | 3 | BIN 분할 + CRC (`ota-protocol` 연동) | ✅ 완료 |
-| 4 | 핸드셰이크 + 단순 송수신 + ACK (당초 계획이던 `OtaSession` FSM 통짜 구현 대신, 더 작은 단위로 쪼개서 점진적으로 구현) | 🟡 진행 중 — 핸드셰이크·개별 ACK까지 완료, **배치 ACK·재전송·`OtaSession` 통합은 미착수 → 남은 최대 덩어리** |
+| 4 | 핸드셰이크 + 단순 송수신 + ACK (당초 계획이던 `OtaSession` FSM 통짜 구현 대신, 더 작은 단위로 쪼개서 점진적으로 구현) | 🟡 진행 중 — **`OtaSession`(배치 ACK+선택적 재전송) 구현 완료(2026-08-18), 유닛테스트 7개 통과.** 실기기 검증·화면 연결·`DISCOVER`는 아직 |
 | 5 | 실기기 통합 검증 (라즈베리파이 2대) | ✅ **완료 (2026-08-17)** — 파일 전송 + 재조립 무결성 검증 통과 |
 
 > **[2026-08-17 갱신 안내]** 이 문서의 이전 버전(8/15 기준)은 마일스톤 2를
@@ -53,8 +53,11 @@
 | `transport/cc1101_ioctl.h`, `cc1101_status.h` | 커널 드라이버와 공유하는 계약 헤더(ioctl 번호·구조체), 상태값 타입 | 완료 |
 | `session/simplesender.h/.cpp` | `simpleSendFile()`(ACK 없이 순서대로 쏘기만 함) + `performHandshake()`(START 보내고 ACK 올 때까지 재시도) + `sendDataAndEnd()` | 완료 |
 | `session/simplereceiver.h/.cpp` | `tryReceiveOnce()`(패킷 하나 받아서 종류 구분) + `sendAckFor()`(받으면 반사적으로 ACK 응답, 재전송 판단은 안 함) | 완료 |
+| `session/otasession.h/.cpp` | **`OtaSession`(FSM)** — 배치(윈도우) 단위 ACK + 누락분만 선택적 재전송(Selective-Repeat), 핸드셰이크/END까지 상태로 관리. `docs/fsm-design.md` §6 알고리즘 구현체 | 유닛테스트 8개 통과. **실기기 검증 완료(1067/1067, sha256 일치, 드라이버 우회책 없이도 성공, 전송 효율 개선까지 완료 — 중복 수신 1063→5개, 2026-08-19, 3절 참고).** 화면 미연결·`DISCOVER` 미포함 |
 | `tests/tst_binsplitter.cpp` | `BinSplitter` 자동 유닛테스트 (ctest 등록됨) | 완료 |
-| `tests/smoke_send_main.cpp`, `smoke_recv_main.cpp` | `Cc1101Transport` 기반 실기기 수동 테스트 CLI (ctest 미등록) | **실기기 검증 완료.** `smoke_recv`는 2번째 인자로 받은 파일 재조립까지 지원(무결성 검증은 미실행) |
+| `tests/tst_otasession.cpp` | `OtaSession` 자동 유닛테스트 — `FakeTransport`(인메모리)로 핸드셰이크/배치ACK/NACK재전송/타임아웃/재시도초과/END NACK/일시정지/배치전송중폴링 시나리오 검증 (ctest 등록됨) | 완료, 8개 케이스 통과 |
+| `tests/smoke_send_main.cpp`, `smoke_recv_main.cpp` | `Cc1101Transport` 기반 실기기 수동 테스트 CLI (ctest 미등록) — 단순 전송(ACK 안 기다림) 경로 | **실기기 검증 완료.** `smoke_recv`는 2번째 인자로 받은 파일 재조립까지 지원 |
+| `tests/smoke_session_send_main.cpp` | `Cc1101Transport` + **`OtaSession`** 기반 실기기 송신 CLI (ctest 미등록). 수신측은 별도 프로그램 없이 기존 `ota_smoke_recv`를 그대로 씀 | 실기기 검증 완료 (1067/1067, sha256 일치, 드라이버 우회책 없이도 성공, 2026-08-19) |
 | `tools/spidev/` (폴더 전체) | **[진단 도구, 제품 코드 아님]** 커널 계층을 우회해 `/dev/spidevX.Y`로 CC1101을 직접 폴링 — "원인이 하드웨어냐 커널이냐"를 가르는 통제 실험용. `ota_core`에 안 들어감 | 유지 (삭제 조건은 `tools/spidev/README.md`) |
 
 > `session/simplesender.h/.cpp`에 핸드셰이크 로직을 처음엔 별도
@@ -97,18 +100,124 @@
 - [x] `sendAckFor()` — Start/Data/End 받으면 반사적으로 ACK 응답 (재전송 판단 없음)
 - [x] `performHandshake()` — START를 보내고 ACK 올 때까지 대기(타임아웃 300ms×5회 재시도),
       실패하면 데이터 전송 자체를 시작 안 함
-- [ ] 배치(윈도우) 단위 ACK + 누락분만 재전송(`RETRANSMITTING`) — 미착수.
-      오늘 실기기 테스트로 "청크마다 개별 ACK가 필요하다", "리시버가 먼저
-      타임아웃 NACK을 보낼 수 있다"는 ESP32 쪽 실제 구현 방식을 확인해둠
-      (`design-notes-FHSS-project-es.md` 5절) — 이 요구사항에 맞춰서 설계
-- [ ] `PAUSED`/`FAILED`/`COMPLETED` 같은 명시적 상태 관리 — 미착수
-- [ ] 위 로직들을 하나의 `OtaSession`(FSM) 클래스로 통합 — 미착수. 지금은
-      `simplesender`/`simplereceiver`의 함수들을 CLI(`tests/smoke_*_main.cpp`)가
-      순서대로 호출하는 구조라, 화면(`otamanager.cpp`)에서 쓰려면 상태 관리
-      계층이 필요함
-- [ ] `DISCOVER`/`DISCOVER_ACK` 기반 기기 탐색 흐름 — 프로토콜 레벨 타입/인코딩은
-      `ota-protocol`에 이미 있음, `gateway-ota` 쪽 사용 로직은 미착수
-- [ ] `otamanager.cpp`(화면)에 위 로직 연결 — 미착수
+- [x] **배치(윈도우) 단위 ACK + 누락분만 재전송(`RETRANSMITTING`) — 구현 완료(2026-08-18)**.
+      `OtaSession::tickWaitingBatchAck()`가 `docs/fsm-design.md` §6 알고리즘 그대로
+      동작: 슬롯(청크)별 개별 ACK/NACK 처리, NACK은 타임아웃 안 기다리고 즉시
+      재전송("이중 방어"), 타임아웃은 슬롯별 독립 타이머로 감지. `batchSize`(기본 5),
+      타임아웃/재시도(기본 300ms×5회)는 생성자 파라미터
+- [x] **`PAUSED`/`FAILED`/`COMPLETED`(+`Idle`/`Handshaking`/`SendingBatch`/
+      `WaitingBatchAck`/`Retransmitting`/`WaitingEndAck`) 명시적 상태 관리 —
+      `OtaSessionState` enum + `state()`/`setOnStateChanged()`로 구현**
+- [x] **`OtaSession`(FSM) 클래스로 통합 — `session/otasession.h/.cpp`**.
+      `simplesender`/`simplereceiver`의 START/END 인코딩·`tryReceiveOnce()`를
+      그대로 재사용하고, 그 위에 배치 루프·타이머·재시도 카운터를 얹음.
+      `tick(nowMs)`를 주기 호출하는 구조라 Qt `QTimer`로 그대로 감쌀 수 있음
+- [x] **실기기(라즈베리파이 2대) 검증 — 완료 (2026-08-19).** `tests/
+      smoke_session_send_main.cpp`(신규 CLI)로 송신측에서 `OtaSession`을
+      돌리고 기존 `ota_smoke_recv`를 수신측에 띄워
+      **1067/1067 청크, 누락 0, sha256 완전 일치**를 얻었습니다
+      (`f81809e47585b4996788be95c99ffc2c12cea2f00a3205bc483ab8ba6e932f0a`).
+
+      **증명된 것**: `OtaSession`의 FSM·배치 ACK·선택적 재전송 로직이 실제
+      RF 환경(진짜 패킷 손실이 있는 상태)에서 동작한다는 것. 그리고 실기기에서만
+      재현되는 "재전송 버스트" 버그를 찾아 수정한 것(아래 절 참고).
+
+      **✅ 반복 성공 확인 (2026-08-19)** — 같은 조건으로 한 번 더 돌려
+      **2회 연속 성공**. 우연히 한 번 된 게 아님이 확인됐고, 단순 전송 경로에
+      적용했던 "2회 연속" 기준도 충족.
+
+      **✅ 드라이버 수정 확인 + 우회책 제거 (2026-08-19, 욕토 환경 재구축 후)**
+      — 드라이버 담당자가 `cc1101_gdo0_thread()`의 RX 정지 원인을 고쳤다고
+      전달받아, `smoke_recv_main.cpp`의 `startRx()` 강제 호출(커밋
+      `ae2a6d7`)을 지우고(`027e93e`) 다시 돌림. **우회책 없이 1067/1067,
+      누락 0, sha256 완전 일치** — 드라이버 수정이 실제로 유효함을 확인.
+      이걸로 이 항목이 요구하던 "완료 조건"(우회책 없이 성공)이 충족됨.
+      단, 우회책 제거 후 성공은 아직 1회 — 반복 확인은 다음 스모크테스트
+      때 자연히 누적될 예정(급하게 따로 안 잡음).
+
+      **함께 확인된 것**: 이 재검증은 `OTA_START`에 실제 SHA256을 채우기
+      시작한 뒤(2026-08-19, 아래 "ESP32 통합 전 필요 작업" 참고) 처음으로
+      1067청크 규모에서 돌린 것이기도 함 — 대용량에서도 SHA256 계산·전달·
+      (수신측 자동 검증) 경로가 정상 동작함을 같이 확인.
+
+      **남은 비효율 → 원인 규명 + 수정 + 실기기 재검증 완료 (2026-08-19)**:
+      중복 수신이 1062~1063개(청크 1067개 대비, 사실상 전 청크를 두 번씩
+      보내는 수준)였던 원인을 찾음 — `enterSendingBatch()`가 배치 안 청크를
+      다 보낼 때까지(최대 (batchSize-1)*chunkDelayMs ≈ 160ms) `recv()`를
+      한 번도 안 불러서, 그 사이 이미 도착해 있던 ACK를 다음
+      `WaitingBatchAck` 틱까지 그냥 흘려보내고 있었음(CC1101은 송신 완료
+      후 MCSM1 설정대로 자동으로 RX 복귀하므로 이 구간에도 원래 들을 수
+      있었는데, 소프트웨어가 안 듣고 있었을 뿐). `chunkDelayMs` 대기를
+      5ms 단위로 쪼개 그 사이사이 폴링하도록 수정(`30b2b3f`) — 새 유닛테스트
+      (`batchSendingPollsAlreadyArrivedAckDuringSend`)로 수정 전 코드에서는
+      실제로 실패함을 확인한 뒤 수정, 기존 유닛테스트 8개 회귀 없음.
+
+      **✅ 실기기 재검증(1067청크) — 중복 수신 1063개 → 5개로 급감**
+      (99.5%↓), 1067/1067·누락 0·sha256 완전 일치는 그대로 유지. 가설이
+      맞았음을 실측으로 확인 — 남은 5개는 half-duplex 특성상 발생하는
+      정상 범위의 잔여 케이스로 판단(선택적 재전송이 그대로 커버).
+- [x] **NACK 경로 — 근본 원인 발견·수정·실기기 검증 완료 (2026-08-19).**
+      `sendAckFor()`가 `resultCode`와 무관하게 항상 `OTA_PKT_ACK`로만
+      인코딩하던 버그를 찾음(송신측 판정이 kind+resultCode를 같이 봐서
+      동작 자체는 어쩌다 맞았지만, 와이어에 진짜 `OTA_NACK` 타입이 한 번도
+      안 나가고 있었음) — 이게 "NACK 경로 검증 안 됨"의 근본 원인이었음.
+      `resultCode != OK`면 `OTA_PKT_NACK`으로 인코딩하도록 수정, 이 함수를
+      검증하는 유닛테스트가 그동안 없었어서 `tests/tst_simplereceiver.cpp`
+      새로 작성(5개 케이스, 수정 전 코드로는 실제로 실패함을 확인 후 수정).
+      `peekDataHeaderForNack()`도 추가해 CRC 깨진 DATA도 어떤 청크인지
+      알아내 NACK을 보낼 수 있게 함. `smoke_recv_main.cpp`를 실제
+      CRC 오류·범위 밖 sequence 상황에 연결(후자는 저장 안 하면서도 ACK를
+      보내던 기존 버그이기도 했음).
+
+      **✅ 실기기 검증 (`tests/smoke_bad_data_main.cpp`)** — CRC를 일부러
+      깨뜨린 DATA(seq=0)와 범위 밖 sequence(seq=999)를 각각 보내서
+      `<- OTA_NACK session=... seq=0 result=INVALID_CRC`,
+      `<- OTA_NACK session=... seq=999 result=INVALID_SEQUENCE`를 실제로
+      수신 확인 — 수신측 로그에서도 `NACK(CRC 오류) 전송함`/`NACK(순서
+      오류) 전송함`이 그대로 찍힘. 와이어 레벨에서 ACK와 다른 진짜 NACK
+      타입 패킷이 왕복하는 것까지 실기기로 완전히 확인됨.
+- [ ] `DISCOVER`/`DISCOVER_ACK` 기반 기기 탐색 흐름 — **구현 진행 중
+      (2026-08-20)**. `session/discovery.h/.cpp`에 `discoverDevices()`
+      추가 — `OTA_DISCOVER`를 한 번 브로드캐스트하고 `waitMs`(기본
+      1000ms) 동안 도착하는 `DISCOVER_ACK`들을 device_id 기준으로
+      중복 제거해 모아서 반환. `OtaSession`은 의도적으로 이 부분을
+      포함하지 않음(아래 참고) — `discoverDevices()`도 같은 이유로
+      별도 파일. 구현 중 `simplereceiver.h`의 `ReceivedPacket`에
+      `fwMajor`/`fwMinor`/`fwPatch` 필드가 빠져 있던 걸 발견해 같이
+      추가(`tryReceiveOnce()`가 `DISCOVER_ACK`의 버전 필드를 지금까지
+      조용히 버리고 있었음). 유닛테스트(`tests/tst_discovery.cpp`) 5개
+      작성 완료, 샌드박스 컴파일 검증은 진행 중 — ESP32가 자리를 비운
+      동안 미리 준비해 두는 작업(실기기 검증은 ESP32 복귀 후)
+- [ ] `otamanager.cpp`(화면)에 실제 전송 로직 연결 — 미착수
+
+#### 실기기 검증에서 찾은 버그 — 재전송 버스트 (2026-08-19 수정)
+
+유닛테스트(`FakeTransport`)는 전부 통과하는데 실기기에서만 "배치 재전송
+한도(5회) 초과"로 죽는 문제가 있었습니다. 원인은 `tickWaitingBatchAck()`이
+**타임아웃된 슬롯 전부를 한 틱에 연달아 재전송**한 것이었습니다
+(`retransmitSlot()`에 `chunkDelayMs` 간격도 없었음).
+
+CC1101은 **반이중(half-duplex, 송신 중에는 수신 불가)**이라, 그 연속 송신
+구간 동안 수신측이 보낸 ACK가 전부 송신측 귀에 안 들어옵니다. 그러면 다음
+타임아웃에 또 몰아 쏘고 또 못 듣는 악순환이 되어 재시도 한도를 넘깁니다.
+결정적 단서는 **수신측 로그에 해당 seq를 정상 수신하고 ACK를 보낸 기록이
+남아 있는데 송신측만 실패**한 것이었습니다.
+
+`FakeTransport`는 인메모리라 송수신이 동시에 가능해서 이 문제가 드러나지
+않았습니다 — **반이중 특성은 실기기에서만 재현되는 종류의 버그**입니다.
+
+수정: 한 틱에 하나만 재전송(`break`) + 재전송에도 `chunkDelayMs` 적용.
+
+> **남은 개선 여지**: 검증 성공 회차의 중복 수신이 1063개(청크 1067개 대비)로,
+> 사실상 전 청크를 두 번씩 보낸 셈입니다. 정확성엔 문제없지만 전송 효율은
+> 절반 수준 — 배치 전송 중에 돌아오는 ACK를 못 듣는 구조라서 생깁니다.
+> 배치 크기·`chunkDelayMs`·타임아웃 조정으로 개선 여지가 있습니다.
+
+> **`OtaSession`이 `docs/fsm-design.md` 전체 상태표를 구현하지는 않습니다.**
+> `DISCONNECTED`/`CONNECTED_IDLE`/`FILE_READY`/`DISCOVERING`/`SELECTING`은
+> 연결·파일선택·기기조회처럼 화면이 담당할 상위 흐름이라 빠졌고, `start()`가
+> `targetDeviceId`를 파라미터로 바로 받는 걸로 대신합니다. "세션이 시작된
+> 이후"(`HANDSHAKING` ~ `COMPLETED`/`FAILED`)만 이 클래스의 책임입니다.
 
 ---
 
@@ -167,6 +276,8 @@ cmp -l test.bin recv.bin | awk '{print int(($1-1)/48)}' | sort -n | uniq -c
 | 2026-08-16 | 1067/1067 | **운이 좋았던 것으로 판단** |
 | 2026-08-17 1차 | 811/1067 | 순간 간섭 |
 | 2026-08-17 2차 | 1059/1067 | 8개 손실 |
+| 2026-08-18 1차 (욕토 환경) | 1067/1067 | `RXFIFO_OVERFLOW` 드라이버 버그 수정 후, **sha256 완전 일치** |
+| 2026-08-18 2차 (욕토 환경) | 1067/1067 | 재현 확인, **sha256 완전 일치** |
 
 → **새 게이트: "손실된 청크를 제외한 전 구간이 원본과 바이트 단위로 일치"**
 이건 소프트웨어가 통제할 수 있는 조건이고, 실제로 검증하려던 것이기도
@@ -200,12 +311,35 @@ cmp -l test.bin recv.bin | awk '{print int(($1-1)/48)}' | sort -n | uniq -c
 | 인터럽트 7,700만 회 폭주 | 커널 | 송신 완료 후 명시적 `SRX` 복원 |
 | 하드웨어 주소필터가 패킷 폐기 | 칩 설정 | `PKTCTRL1`의 `ADR_CHK` 끔 (`0x0D`→`0x0C`) |
 | 커널 헤더/소스 못 구해 모듈 적재 실패 | 인프라 | 빌드서버(10.10.16.54)에서 크로스컴파일로 해결 |
+| `MARCSTATE`가 `RXFIFO_OVERFLOW`에서 안 풀림 (2026-08-18) | 커널 | `SET_RX`가 `SFRX`(FIFO flush) 없이 재진입만 함 — 담당자가 드라이버 수정, 실기기로 수정 확인 |
 
 > **커널 드라이버(`kernel-cc1101-spi`)는 팀원3·4 담당 레포입니다.**
 > 검증 과정에서 부득이 8군데를 고쳤고, 그 내역과 담당자 판단이 필요한 항목을
 > `kernel-cc1101-spi/docs/driver-changes-handoff-2026-08-17.md`에 정리했습니다.
 > **직접 머지하지 않고 PR로 리뷰 요청할 것** — 특히 임시 디버그 로그
 > (`dev_warn`) 원복은 담당자 판단 사항입니다.
+
+### 욕토 환경 재검증 (2026-08-18) — `RXFIFO_OVERFLOW` 버그 수정 후 ✅
+
+팀에서 새로 준비한 욕토(Yocto) 이미지 라즈베리파이 2대로 재검증하다가,
+수신측 칩이 `MARCSTATE=0x11(RXFIFO_OVERFLOW)`에서 안 풀리는 별도의 드라이버
+버그를 발견했습니다(위 표 마지막 행). `CC1101_IOC_SET_RX`가 FIFO를 안 비우고
+재진입만 해서, 한번 오버플로에 빠지면 `ota_smoke_recv`를 몇 번을 재시작해도
+안 풀리는 증상이었습니다. 드라이버 담당자께 리포트했고, 수정된 `cc1101.ko`를
+받아 재검증했습니다.
+
+| 항목 | 결과 |
+|---|---|
+| 1차 전송 | 1067/1067, 중복 0, **sha256 완전 일치** |
+| 2차 전송(재현 확인) | 1067/1067, 중복 0, **sha256 완전 일치** |
+
+**08-17 측정(99.25%)보다 나은 결과가 나온 이유**: 그때 손실의 일부(전부는
+아닐 수 있음)가 사실 이 `RXFIFO_OVERFLOW` 복구 실패 때문이었을 가능성이
+있습니다. 다만 **이게 "재전송이 이제 필요 없다"는 뜻은 아닙니다** — 이건
+특정 버그 하나를 없앤 것이고, 무선 채널 자체의 순간 손실(간섭, 페이딩)은
+여전히 존재하는 별개의 문제입니다. 마일스톤 4의 재전송은 그대로 필요합니다.
+자세한 경위는 `docs/note/design-notes-gateway-ota-es.md` 25절,
+`kernel-cc1101-spi/docs/troubleshooting-cc1101.md` 1-3-1절 참고.
 
 ---
 
@@ -218,26 +352,65 @@ cmp -l test.bin recv.bin | awk '{print int(($1-1)/48)}' | sort -n | uniq -c
 
 ### 다음 실질 작업 — 마일스톤 4 마무리
 
-3. **배치 ACK + 누락분 재전송** 설계·구현. ESP32 쪽 실제 동작
-   (청크마다 개별 ACK, 리시버 선제 타임아웃 NACK)에 맞춤 —
-   `design-notes-FHSS-project-es.md` 5절
-4. `simplesender`/`simplereceiver`를 **`OtaSession`(FSM)으로 통합**.
-   지금은 CLI가 함수를 순서대로 호출하는 구조라, 화면에 붙이려면 상태 관리
-   계층이 필요함 — 이게 마일스톤 4의 핵심 남은 덩어리
-5. `otamanager.cpp`(화면)에 실제 전송 로직 연결
+3. ~~배치 ACK + 누락분 재전송 설계·구현~~ **완료 (2026-08-18)** —
+   `session/otasession.h/.cpp`, 유닛테스트 `tests/tst_otasession.cpp`
+4. ~~`simplesender`/`simplereceiver`를 `OtaSession`(FSM)으로 통합~~ **완료 (2026-08-18)**
+5. ~~`OtaSession` 실기기 검증~~ **완료 (2026-08-19)**. 1067/1067 sha256
+   일치, "재전송 버스트" 버그 수정, 2회 연속 성공, **드라이버 수정 확인 +
+   우회책 제거 후에도 성공**까지 전부 확인(3절 참고). 남은 건 전송 효율
+   개선(아래 참고) — 중복 수신 1062~1063개로 사실상 전 청크를 두 번씩
+   보내고 있어 배치 크기(5)·`chunkDelayMs`(40)·타임아웃(300ms) 조합
+   재조정이 후보
+6. `otamanager.cpp`(화면)에 실제 전송 로직 연결 — `OtaSession::tick()`을
+   Qt `QTimer`로 주기 호출, `setOnStateChanged()`로 진행률바·로그 갱신
+7. ~~`OTA_START`에 실제 SHA256 채워 보내기~~ **완료 (2026-08-19)** — 아래
+   "ESP32 통합 전 필요 작업" 절 참고
 
 ### 성능 / 팀 협의
 
-6. **`chunkDelayMs`를 40ms 아래로** — 현재 1067청크에 약 43초. 10ms에서는
+8. **`chunkDelayMs`를 40ms 아래로** — 현재 1067청크에 약 43초. 10ms에서는
    패킷 경계가 밀림. `out_rearm`에서 `SFRX` 없이 `SRX`만 하는 것이 관련
    있을 수 있음(유저공간 구현은 매번 `SIDLE; SFRX; SRX`로 완전히 비움)
-7. `ota-protocol`의 `OTA_BROADCAST_DEVICE_ID`(0xFFFFFFFF) vs
+9. `ota-protocol`의 `OTA_BROADCAST_DEVICE_ID`(0xFFFFFFFF) vs
    `OTA_DEVICE_ID_MAX`(0xFFFFFF) 범위 모순 — 팀 합의 필요
-8. **누가 어떤 주파수/싱크워드/채널을 쓰는지 팀 관리표 만들기** —
-   이번 충돌 사고의 근본 원인
-9. `DISCOVER`/`DISCOVER_ACK` 기반 기기 탐색 흐름 구현
-10. ESP32 쪽 `main/fsm.c`의 OTA 수신 배선(TODO, 담당 "팀2") 완료 후
-    실제 게이트웨이→ESP32 종단 간 테스트
+10. **누가 어떤 주파수/싱크워드/채널을 쓰는지 팀 관리표 만들기** —
+    이번 충돌 사고의 근본 원인
+11. `DISCOVER`/`DISCOVER_ACK` 기반 기기 탐색 흐름 구현
+12. ESP32 쪽 `main/fsm.c`의 OTA 수신 배선(TODO, 담당 "팀2") 완료 후
+    실제 게이트웨이→ESP32 종단 간 테스트 — 아래 "ESP32 통합 전 필요 작업" 참고
+
+### ESP32 통합 전 필요 작업 (2026-08-19 추가)
+
+`firmware-esp32`의 실제 수신 코드(`ota_client.c`/`ota_writer.c`/
+`ota_consumer.c`)를 읽어보고 발견한, 라즈베리파이끼리 테스트할 때는 안
+드러나던 블로커입니다.
+
+- [x] **`OTA_START`의 `image_sha256`을 실제 값으로 채우기** — 지금까지
+      `OtaSession`은 이 필드를 0으로만 채워 보냈습니다(수신측이 라즈베리
+      파이일 땐 이 값을 안 봐서 문제없었음). 그런데 ESP32
+      `ota_writer_finish()`는 `psa_hash_finish()`로 실제 수신 데이터의
+      SHA256을 계산해 이 필드와 `memcmp()`로 비교하고, 다르면
+      `ESP_ERR_INVALID_CRC`를 돌려줘서 `OTA_END`가 항상 NACK됩니다 —
+      즉 **DATA 전송은 1067/1067 전부 성공해도 마지막 한 걸음에서 항상
+      거부당하는 구조**였습니다. 외부 라이브러리(OpenSSL/mbedtls) 없이
+      `core/sha256.h/.cpp`에 표준 SHA-256을 직접 구현해서 해결(경계값
+      55/56/57/63/64/65/119/120/128byte + 10만byte 파일까지 자체 테스트
+      통과, 유닛테스트 7개 회귀 확인). `OtaSession::start()`가 파일을 읽는
+      시점에 해시를 계산해 두고, `sendStartPacket()`에서 그대로 실어 보냄.
+      **덧붙여 수신측(`ota_smoke_recv`)에도 자동 검증을 추가함** — 지금까지는
+      재조립(누락 0개) 확인 후 사람이 양쪽에서 `sha256sum`을 손으로 돌려
+      비교해야 했는데, `ReceivedPacket`에 `imageSha256` 필드를 추가해
+      START 값을 받아 두고, `OTA_END`에서 같은 `core/sha256.h`로 재조립된
+      파일의 해시를 직접 계산·비교해 일치/불일치를 자동 출력하도록 함
+      (ESP32의 `ota_writer_finish()`와 같은 절차를 Pi에서 미리 리허설하는
+      셈). 실기기(라즈베리파이-라즈베리파이) 재검증은 아직 안 함 — 다음
+      스모크테스트에서 확인 필요.
+- [ ] ESP32 `ota_batch_cache.h`의 `OTA_CLIENT_DATA_MAX_PAYLOAD_SIZE`(48)가
+      공유 헤더 `ota_protocol.h`의 `OTA_MAX_PAYLOAD_SIZE`를 참조하지 않고
+      독립된 매직넘버로 따로 정의돼 있음 — 지금 당장 문제는 아니지만 둘 중
+      하나만 바뀌면 조용히 깨질 수 있는 지점, 팀 공유 필요
+- [ ] Pi-to-ESP32 실통합 테스트 자체 — 위 두 항목 + 항목 12(ESP32 수신
+      배선)까지 끝나야 시작 가능
 
 ---
 

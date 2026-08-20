@@ -29,6 +29,15 @@ public:
     virtual bool send(const std::vector<uint8_t> &data) = 0;
     // 수신 가능한 데이터가 있으면 읽어서 반환, 없으면 빈 벡터.
     virtual std::vector<uint8_t> recv() = 0;
+
+    // [2026-08-19 추가] 수신 버퍼를 강제로 비움. CC1101처럼 실제 하드웨어
+    // RX FIFO를 가진 구현체(Cc1101Transport)는 이걸로 RXFIFO_OVERFLOW 같은
+    // "쌓여서 막힌" 상태를 복구합니다(kernel-cc1101-spi 8/18 디버깅에서
+    // 확인된 것과 같은 계열의 문제 — SET_RX만으로는 안 풀리고 FLUSH_RX로
+    // FIFO를 강제로 비워야 회복됨). FakeTransport처럼 실제 FIFO가 없는
+    // 구현체는 아무 것도 할 필요가 없어서 기본 구현(빈 몸통)을 둡니다 —
+    // 그런 구현체는 override 안 해도 됨.
+    virtual void flushRx() {}
 };
 
 #endif // ITRANSPORT_H

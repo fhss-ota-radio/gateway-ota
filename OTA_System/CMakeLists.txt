@@ -50,10 +50,16 @@ message(STATUS "ota-protocol include: ${OTA_PROTOCOL_INCLUDE_DIR}")
 add_library(ota_core STATIC
     core/binsplitter.h
     core/binsplitter.cpp
+    core/sha256.h
+    core/sha256.cpp
     session/simplesender.h
     session/simplesender.cpp
     session/simplereceiver.h
     session/simplereceiver.cpp
+    session/otasession.h
+    session/otasession.cpp
+    session/discovery.h
+    session/discovery.cpp
     transport/itransport.h
     transport/cc1101_status.h
     transport/cc1101transport.h
@@ -111,6 +117,43 @@ target_link_libraries(ota_core_tests
 )
 add_test(NAME ota_core_tests COMMAND ota_core_tests)
 
+# ---------- ota_session_tests: OtaSession(FSM) 배치ACK/재전송 로직 검증 ----------
+# tst_binsplitter.cpp와 별개 실행파일로 둔 이유: 기존 관례(파일 하나 = main() 하나 =
+# 실행파일 하나)를 그대로 따름. FakeTransport(인메모리)로 실기기 없이 검증하므로
+# ota_core_tests와 마찬가지로 add_test()에 등록해 ctest로 자동 실행됨.
+add_executable(ota_session_tests
+    tests/tst_otasession.cpp
+)
+target_link_libraries(ota_session_tests
+    PRIVATE
+        ota_core
+)
+add_test(NAME ota_session_tests COMMAND ota_session_tests)
+
+# ---------- ota_receiver_tests: sendAckFor()/peekDataHeaderForNack() 검증 ----------
+# 2026-08-19 발견: sendAckFor()가 resultCode와 무관하게 항상 OTA_PKT_ACK로만
+# 인코딩하던 버그(NACK이 와이어에 한 번도 안 나갔음)의 회귀 테스트.
+add_executable(ota_receiver_tests
+    tests/tst_simplereceiver.cpp
+)
+target_link_libraries(ota_receiver_tests
+    PRIVATE
+        ota_core
+)
+add_test(NAME ota_receiver_tests COMMAND ota_receiver_tests)
+
+# ---------- ota_discovery_tests: discoverDevices() (DISCOVER/DISCOVER_ACK) 검증 ----------
+# 2026-08-20 착수. FakeTransport(인메모리)로 실기기 없이 조회/중복제거/무응답
+# 시나리오를 검증 — ota_session_tests와 같은 패턴.
+add_executable(ota_discovery_tests
+    tests/tst_discovery.cpp
+)
+target_link_libraries(ota_discovery_tests
+    PRIVATE
+        ota_core
+)
+add_test(NAME ota_discovery_tests COMMAND ota_discovery_tests)
+
 # ---------- ota_smoke_send / ota_smoke_recv: 실기기(CC1101) 스모크테스트용 CLI ----------
 # /dev/cc1101이 실제로 있어야 동작하는 수동 실행 도구라서 add_test()에는 등록하지
 # 않음 — ctest(자동 빌드 검증)에는 안 끼고, 실기기 앞에서 사람이 직접 실행.
@@ -126,6 +169,41 @@ add_executable(ota_smoke_recv
     tests/smoke_recv_main.cpp
 )
 target_link_libraries(ota_smoke_recv
+    PRIVATE
+        ota_core
+)
+
+# OtaSession(FSM, 배치 ACK+선택적 재전송) 기반 송신 CLI — ota_smoke_send와
+# 하는 일은 같지만 안쪽 로직이 session/otasession.h를 씀. 수신측은 별도
+# 프로그램 없이 기존 ota_smoke_recv를 그대로 씀(이미 청크마다 개별 ACK를
+# 반사적으로 보내고 있어서 OtaSession이 기대하는 응답과 맞음).
+add_executable(ota_smoke_session_send
+    tests/smoke_session_send_main.cpp
+)
+target_link_libraries(ota_smoke_session_send
+    PRIVATE
+        ota_core
+)
+
+# session/simplereceiver.h의 sendAckFor()가 실제로 NACK을 만들어 보내는지
+# 실기기(CC1101)로 확인하는 전용 도구 — 일부러 CRC를 깨뜨리거나 범위 밖
+# sequence로 DATA를 보내서, ota_smoke_recv가 진짜 NACK을 돌려주는지 본다.
+# 자세한 이유는 tests/smoke_bad_data_main.cpp 상단 주석 참고.
+add_executable(ota_smoke_bad_data
+    tests/smoke_bad_data_main.cpp
+)
+target_link_libraries(ota_smoke_bad_data
+    PRIVATE
+        ota_core
+)
+
+# discoverDevices()(session/discovery.h)로 실제 ESP32를 조회해보는 CLI —
+# 2026-08-20. ESP32가 MENU_OTA 화면일 때만 DISCOVER_ACK로 응답한다
+# (firmware-esp32의 ota_consumer_is_ota_mode() 조건).
+add_executable(ota_smoke_discover
+    tests/smoke_discover_main.cpp
+)
+target_link_libraries(ota_smoke_discover
     PRIVATE
         ota_core
 )

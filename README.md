@@ -24,7 +24,7 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
 | 1 | Qt 프로젝트 세팅 및 화면 뼈대 | ✅ 완료 |
 | 2 | 전송 계층 추상화 + `Cc1101Transport` | ✅ 완료 (실기기 1067/1067) |
 | 3 | BIN 분할 + CRC | ✅ 완료 |
-| 4 | 핸드셰이크 + 송수신 + ACK | 🟡 핸드셰이크·개별 ACK 완료 / 배치 ACK·재전송·`OtaSession` FSM 미착수 |
+| 4 | 핸드셰이크 + 송수신 + ACK | 🟡 `OtaSession`(배치 ACK+선택적 재전송) 구현·유닛테스트 완료(2026-08-18) / **실기기 검증·화면 연결은 아직** |
 | 5 | 실기기 통합 검증 | ✅ 완료 — 전송 + 재조립 무결성 검증 통과 |
 
 > **무선 손실 약 0.75%는 재전송(마일스톤 4)으로 메워야 합니다.**
@@ -114,6 +114,26 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
       하나만 지우면 제거되도록. 존재 이유·삭제 조건은 위 README,
       빌드/실행법은
       [`docs/testing-spidev-transport.md`](docs/testing-spidev-transport.md) 참고.
+
+### 마일스톤 4 — `OtaSession`(FSM) — 배치 ACK + 선택적 재전송 (진행 중)
+- [x] **(2026-08-18)** `session/otasession.h/.cpp` — [`docs/fsm-design.md`](docs/fsm-design.md)의
+      송신측 상태기계 구현체. `HANDSHAKING`→`SENDING_BATCH`→`WAITING_BATCH_ACK`↔`RETRANSMITTING`→`WAITING_END_ACK`→`COMPLETED`/`FAILED`,
+      `PAUSED` 포함. `simplesender`/`simplereceiver`의 START/END 인코딩·수신 디코딩을
+      그대로 재사용
+  - 배치(기본 5청크) 단위로 전부 전송 후 확인 대기, 슬롯(청크)별 개별
+    타임아웃(기본 300ms)·재시도(기본 5회) 관리. NACK은 타임아웃을 기다리지
+    않고 그 슬롯만 즉시 재전송(Selective-Repeat, 배치 전체 재전송 아님)
+  - `tick(nowMs)`를 시각 파라미터로 받는 구조 — Qt `QTimer`로 주기 호출하면
+    되고, 테스트에서는 가짜 시각을 넣어 타임아웃을 실제로 기다리지 않고 검증
+  - `tests/tst_otasession.cpp` — `FakeTransport`(인메모리)로 핸드셰이크/배치
+    ACK/NACK 즉시재전송/타임아웃재전송/재시도초과/END NACK/일시정지-재개 7개
+    시나리오 전부 통과 (g++ -std=c++17 확인, ctest 등록됨)
+- [ ] **실기기(라즈베리파이 2대) 검증 — 아직.** `simplereceiver.cpp`의
+      `sendAckFor()`가 현재 NACK을 실제로 안 보내서(항상 ACK만 생성), NACK
+      경로는 시뮬레이션으로만 확인됨
+- [ ] `DISCOVER`/`DISCOVER_ACK` 기기 조회 — `OtaSession`에 의도적으로 미포함
+      (연결·화면 담당 상위 흐름, `docs/roadmap.md` 3절 참고)
+- [ ] `otamanager.cpp`(화면)에 연결 — 미착수
 
 ## 문서
 
