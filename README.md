@@ -168,6 +168,19 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
       연결 완료(`otamanager.cpp` 쪽은 `feature/qt-ui-integration` 담당
       영역이라 이번엔 제외). 유닛테스트 1개 추가, 전체 13개 통과. 상세:
       `docs/note/design-notes-gateway-ota-es.md` 36절
+- [x] **(2026-08-20) 실기기 첫 전송 실패(seq=139, seq=959) 원인 규명 + 대응** —
+      Pi↔ESP32 실전송에서 재시도 한도 초과로 2회 연속 실패. Gateway·ESP32
+      양쪽 로그를 session_id로 대조해, Gateway의 자체 타임아웃(300ms)과
+      ESP32의 독립 NACK 재시도(500ms)가 같은 `retryCount` 예산을 중복으로
+      깎아먹는 것이 원인임을 확인(34절에서 보류했던 **클레임4** 실물 재현).
+      대응 두 가지: (1) CLI에 `timeoutMs`/`maxRetry` 인자 노출(여유값으로
+      재테스트 가능), (2) `drainAckOrNackQueue()` 추가 — 한 틱에 큐에 쌓인
+      ACK/NACK을 하나만 보던 걸 비거나 실패할 때까지 전부 처리하도록 변경.
+      회귀테스트 1개 추가(옛 코드 빌드로 실패 재현 확인 후 수정 코드로
+      통과 확인), 전체 14개 통과. **(2)는 큐에 여러 응답이 동시에 쌓인
+      경우만 커버하고, 시간차를 두고 따로 도착하는 경우는 (1)의 늘어난
+      예산이 방어선** — 둘을 같이 켠 채로 재테스트 예정. 상세:
+      `docs/note/design-notes-gateway-ota-es.md` 37절
 
 ## 문서
 

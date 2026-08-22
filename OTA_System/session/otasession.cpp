@@ -343,9 +343,15 @@ bool OtaSession::retransmitSlot(BatchSlot &slot, int64_t nowMs, const char *reas
     return true;
 }
 
-bool OtaSession::pollAndApplyAckOrNack(int64_t nowMs)
+bool OtaSession::pollAndApplyAckOrNack(int64_t nowMs, bool *hadPacket)
 {
     const auto packet = tryReceiveOnce(m_transport);
+    // 큐가 비어 있었는지(hadPacket=false) 뭔가 읽었는지(true)를 기록 —
+    // tryReceiveOnce()는 아직 도착한 게 없으면 kind==Unknown && raw가
+    // 빈 상태로 돌려준다(simplereceiver.h 주석). drainAckOrNackQueue()가
+    // 이 값으로 "더 읽을 게 남았는지" 판단한다.
+    if (hadPacket)
+        *hadPacket = !(packet.kind == ReceivedPacketKind::Unknown && packet.raw.empty());
     // [버그 수정 2026-08-20, ESP32 담당자 리포트 클레임 1] acknowledged_type이
     // OTA_PKT_DATA인 응답만 배치 슬롯에 매칭한다. 예전엔 이 필드를 확인 안
     // 하고 sequence만 봤는데, sequence 하나만으로는 "이게 START/END에 대한
@@ -377,6 +383,38 @@ bool OtaSession::pollAndApplyAckOrNack(int64_t nowMs)
             }
             break;
         }
+    }
+    return true;
+}
+
+bool OtaSession::drainAckOrNackQueue(int64_t nowMs)
+{
+    // [2026-08-20 추가, 실기기 재현 버그 수정] 왜 필요한가: ESP32는 배치가
+    // 아직 안 끝났으면 500ms 간격으로 "아직 못 받음" NACK을 반복 전송한다.
+    // 그 사이 실제 데이터가 도착해서 성공 ACK이 뒤따라오면, 파이의 CC1101
+    // 커널 드라이버 수신 버퍼(RX 큐)에는 낡은 NACK 여러 개와 최신 ACK이
+    // 같이 쌓인다. 예전에는 tickWaitingBatchAck()이 한 틱에 딱 하나만
+    // 읽었는데, 그러면 낡은 NACK들을 하나씩 처리하며 재시도 횟수(retryCount)
+    // 를 다 써버리고, 정작 바로 뒤에 있는 최신 ACK은 다음 틱에서야(혹은
+    // 재시도 한도 초과로 아예 못 보고) 처리됐다.
+    //
+    // 2026-08-20 실기기 로그(design-notes 37절, seq=959)로 실제 실패가
+    // 확인됨: ESP32는 이미 ACK을 두 번 보냈는데, Gateway는 그 앞에 쌓여
+    // 있던 낡은 NACK 2개를 처리하다 재시도 한도를 넘겨 실패로 끝났다.
+    //
+    // 큐가 빌 때까지(또는 fail() 나거나 한도에 닿을 때까지) 계속 드레인하면,
+    // 같은 틱 안에서 "낡은 NACK 처리 -> 재전송" 다음에 바로 "최신 ACK 처리
+    // -> acked=true"까지 이어져서, 최신 정보가 항상 마지막에 반영된다.
+    constexpr int kMaxDrainPerTick = 32; // 오작동한 transport가 recv()에서
+        // 절대 빈 값을 안 주는 경우에도 무한루프에 빠지지 않기 위한 안전판.
+        // 배치 크기(기본 5)보다 충분히 크게 잡음 — 슬롯 수보다 훨씬 많은
+        // 중복/낡은 응답이 한꺼번에 쌓이는 경우는 실제로 없었음.
+    for (int i = 0; i < kMaxDrainPerTick; ++i) {
+        bool hadPacket = false;
+        if (!pollAndApplyAckOrNack(nowMs, &hadPacket))
+            return false; // fail() 처리됨
+        if (!hadPacket)
+            break; // 큐가 비었음 — 더 읽을 게 없음
     }
     return true;
 }
@@ -416,8 +454,11 @@ bool OtaSession::pollDuringDelay(int64_t *nowMs)
 
 void OtaSession::tickWaitingBatchAck(int64_t nowMs)
 {
-    // 1. 수신 확인 (논블로킹 폴링 — 한 틱에 패킷 하나만 처리, tryReceiveOnce와 동일 패턴)
-    if (!pollAndApplyAckOrNack(nowMs))
+    // 1. 수신 확인 — 큐에 쌓인 ACK/NACK을 빌 때까지 전부 드레인한다.
+    // [수정 2026-08-20] 예전엔 한 틱에 패킷 하나만 처리했는데, 그러면 낡은
+    // NACK 여러 개가 큐에 쌓여 있을 때 최신 ACK을 늦게 보거나 아예 재시도
+    // 한도 초과로 못 보는 문제가 있었다 — drainAckOrNackQueue() 주석 참고.
+    if (!drainAckOrNackQueue(nowMs))
         return; // fail() 처리됨
 
     // 2. 타임아웃 확인 — 아직 acked=false인 슬롯만.

@@ -561,6 +561,43 @@ void logCallbackFiresOnNackAndAck()
     std::cout << "[OK] logCallbackFiresOnNackAndAck\n";
 }
 
+// [2026-08-20 추가, 실기기 재현 버그(design-notes 37절, seq=959) 대응]
+// 큐에 낡은 NACK과 그 뒤를 바로 잇는 최신 ACK이 "같은 순간에 이미 같이"
+// 쌓여 있으면, 예전엔 한 틱에 하나만 처리해서 ACK을 보려면 tick()을 한 번
+// 더 불러야 했다. drainAckOrNackQueue()로 고친 뒤에는 같은 tick() 한 번
+// 안에서 NACK(재전송 유발) 처리 -> 곧바로 ACK(acked=true) 처리까지 이어져야
+// 한다 — "완전히 해결"은 아니고(낡은 응답이 재시도 한도보다 많이 쌓이면
+// 여전히 실패할 수 있음, design-notes 37절 참고) "같은 틱 안에 이미 도착해
+// 있는 최신 정보를 더 빨리 보게 됐다"는 개선을 검증하는 테스트.
+void drainQueueSeesFreshAckInSameTickAsStaleNack()
+{
+    const std::string path = writeTempFile("os_drain.bin", repeat('O', 10)); // 1청크
+    constexpr uint32_t kSessionId = 0xFFFFFFFEu;
+
+    FakeTransport transport;
+    OtaSession session(transport, 1, /*timeoutMs=*/300, /*maxRetry=*/5, 0);
+
+    session.start(path, 1, kSessionId, 1000);
+    transport.rxQueue.push_back(
+        makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_START, OTA_CONTROL_SEQUENCE));
+    session.tick(1010); // DATA(seq0) 최초 전송 -> WaitingBatchAck
+    assert(transport.countSentOfType(OTA_PKT_DATA) == 1);
+
+    // seq0에 대한 "낡은" NACK과 그 직후의 "최신" ACK을 미리 같이 큐에 넣어둠
+    // — 실기기에서 CC1101 수신 버퍼에 두 응답이 함께 쌓여 있던 상황을 흉내.
+    transport.rxQueue.push_back(
+        makeAckOrNack(OTA_PKT_NACK, kSessionId, OTA_PKT_DATA, 0, OTA_RESULT_INVALID_CRC));
+    transport.rxQueue.push_back(makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_DATA, 0));
+
+    session.tick(1020); // 단 한 번의 tick() 안에서 NACK 처리(재전송)와 ACK 처리(acked)가 다 끝나야 함
+    assert(transport.countSentOfType(OTA_PKT_DATA) == 2); // NACK으로 인한 재전송 1회
+    assert(session.progress().ackedChunks == 1); // 같은 틱 안에서 ACK까지 반영됨
+    assert(session.state() == OtaSessionState::WaitingEndAck); // 1청크뿐이라 배치 완료 -> END로
+
+    std::remove(path.c_str());
+    std::cout << "[OK] drainQueueSeesFreshAckInSameTickAsStaleNack\n";
+}
+
 } // namespace
 
 int main()
@@ -578,6 +615,7 @@ int main()
     handshakeIgnoresAckWithWrongAcknowledgedType();
     batchIgnoresAckWithWrongAcknowledgedType();
     logCallbackFiresOnNackAndAck();
+    drainQueueSeesFreshAckInSameTickAsStaleNack();
     std::cout << "\n모든 테스트 통과\n";
     return 0;
 }
