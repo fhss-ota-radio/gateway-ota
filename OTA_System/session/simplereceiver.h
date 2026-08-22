@@ -32,6 +32,13 @@ struct ReceivedPacket
 
     uint32_t sessionId = 0;          // Start/Data/End/Ack/Nack
     uint32_t sequence = 0;           // Data/Ack/Nack
+    uint8_t  acknowledgedType = 0;   // Ack/Nack — 이 응답이 어떤 패킷 타입(START/
+                                      // DATA/END, ota_packet_type_t 값)에 대한
+                                      // 것인지. [2026-08-20 추가, ESP32 담당자
+                                      // 버그 리포트 클레임 1] 예전엔 이 필드를
+                                      // 읽어놓고 OtaSession이 버렸는데, sequence만
+                                      // 보고 매칭하면 이론상 다른 종류의 응답과
+                                      // 헷갈릴 여지가 있었음(design-notes 34절 참고).
     uint32_t targetDeviceId = 0;     // Start
     uint32_t imageSize = 0;          // Start/End
     uint32_t totalChunks = 0;        // Start/End

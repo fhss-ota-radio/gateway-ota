@@ -108,6 +108,15 @@ public:
     using StateCallback = std::function<void(OtaSessionState)>;
     void setOnStateChanged(StateCallback cb) { m_onStateChanged = std::move(cb); }
 
+    // [2026-08-20 추가] ACK/NACK 수신·재전송·타임아웃처럼 상태 전환보다
+    // 더 촘촘한 이벤트를 한 줄 문자열로 받는 콜백(선택). ESP32 실기기
+    // 테스트에서 "seq3 ACK 처리 실패"처럼 어디서 막히는지 겉으로 안 보여서
+    // (StateCallback만으로는 WaitingBatchAck 안에서 무슨 일이 있었는지
+    // 전혀 알 수 없음) 진단용으로 추가함 — CLI 스모크테스트는 stdout에,
+    // otamanager.cpp는 기존 로그 카드에 그대로 이어붙이면 됨.
+    using LogCallback = std::function<void(const std::string &)>;
+    void setOnLog(LogCallback cb) { m_onLog = std::move(cb); }
+
 private:
     struct BatchSlot
     {
@@ -127,6 +136,7 @@ private:
     OtaSessionState m_state = OtaSessionState::Idle;
     OtaSessionState m_pausedFrom = OtaSessionState::Idle;
     StateCallback m_onStateChanged;
+    LogCallback m_onLog;
     std::string m_errorMessage;
 
     uint32_t m_targetDeviceId = 0;
@@ -146,6 +156,8 @@ private:
 
     void setState(OtaSessionState s);
     void fail(const std::string &reason);
+    // m_onLog가 설정돼 있으면 그대로 전달, 아니면 조용히 무시.
+    void log(const std::string &msg) const;
 
     void enterHandshaking(int64_t nowMs);
     void tickHandshaking(int64_t nowMs);
@@ -154,14 +166,46 @@ private:
     void enterSendingBatch(int64_t nowMs); // 배치를 채우고 즉시 전부 전송 -> WaitingBatchAck
     void tickWaitingBatchAck(int64_t nowMs);
     // 슬롯 하나를 재전송. retryCount가 maxRetry를 넘으면 fail() 처리하고 false 반환.
-    bool retransmitSlot(BatchSlot &slot, int64_t nowMs);
+    // reason: 로그에만 쓰는 문자열("NACK"/"timeout") — 왜 재전송이 트리거됐는지
+    // 구분하기 위함(2026-08-20 로그 추가).
+    bool retransmitSlot(BatchSlot &slot, int64_t nowMs, const char *reason);
     // ACK/NACK 패킷 하나를 논블로킹으로 폴링해서, 있으면 현재 배치(m_batch)에
     // 반영한다(tickWaitingBatchAck()의 "1. 수신 확인" 단계와
     // enterSendingBatch()의 배치 전송 중 폴링이 이 로직을 공유하기 위해 분리함
     // — 2026-08-19 전송 효율 개선, 아래 enterSendingBatch() 주석 참고).
     // 재전송 한도 초과로 fail()이 호출됐으면 false를 반환 — 호출부는 이후
     // 처리를 즉시 중단해야 한다.
-    bool pollAndApplyAckOrNack(int64_t nowMs);
+    // hadPacket(선택, 2026-08-20 추가): 널이 아니면, 이번 호출에서 실제로
+    // 패킷을 하나 읽었는지(true) 아니면 큐가 비어 있었는지(false)를 채워
+    // 준다 — drainAckOrNackQueue()가 "더 읽을 게 남았는지" 판단하는 데 씀.
+    bool pollAndApplyAckOrNack(int64_t nowMs, bool *hadPacket = nullptr);
+
+    // [2026-08-20 추가, 실기기 재현 버그 수정] tickWaitingBatchAck()가 한
+    // 틱에 응답 패킷을 딱 하나만 처리하던 걸, 큐가 빌 때까지(또는 fail()
+    // 날 때까지) 전부 드레인하도록 바꿈. 이유: ESP32는 배치가 아직 안
+    // 끝났으면 500ms 간격으로 "아직 못 받음" NACK을 반복 전송하는데,
+    // 그 사이 실제 데이터가 도착해 ACK가 뒤따라오면 파이의 CC1101 커널
+    // 드라이버 수신 버퍼에 낡은 NACK 여러 개 + 최신 ACK이 같이 쌓인다.
+    // 한 틱에 하나씩만 처리하면 낡은 NACK들을 처리하는 동안 재시도
+    // 횟수를 다 써버려서, 바로 뒤에 있는 최신 ACK을 보기도 전에
+    // "재전송 한도 초과"로 실패할 수 있다 — 2026-08-20 실기기 로그
+    // (seq=959)로 확인됨: ESP32는 이미 ACK을 두 번 보냈는데 Gateway는
+    // 그 앞에 쌓여 있던 낡은 NACK 2개를 처리하다 실패로 끝났다.
+    // 최대 kMaxDrainPerTick번까지만 반복해서, 잘못된 transport 구현이
+    // recv()에서 절대 빈 값을 안 주는 경우에도 무한루프에 빠지지 않게 함.
+    // 재전송 한도 초과로 fail()이 호출됐으면 false를 반환한다.
+    bool drainAckOrNackQueue(int64_t nowMs);
+
+    // chunkDelayMs만큼 5ms 간격으로 쪼개 폴링하며 대기한다. *nowMs를 실제로
+    // 잠든 만큼(step)만 전진시켜서, 대기 중 poll로 다른 슬롯이 재전송되면
+    // 그 슬롯의 sentAtMs도 "그 시점의 진짜 지금"을 반영하게 한다 — 진짜
+    // 시스템 시계(otaSessionNowMs())를 쓰지 않는 이유는, 유닛테스트가
+    // tick()에 넘기는 가짜(논리) nowMs 값으로 타임아웃을 검증하는 구조라서
+    // 여기서 실제 시계를 섞으면 그 타임아웃 계산이 깨지기 때문이다.
+    // enterSendingBatch()(최초 전송 사이 대기)와 retransmitSlot()(재전송
+    // 직후 대기, 2026-08-20 추가)이 이 로직을 공유한다.
+    // 재전송 한도 초과로 fail()이 호출됐으면 false를 반환한다.
+    bool pollDuringDelay(int64_t *nowMs);
 
     void enterWaitingEndAck(int64_t nowMs);
     void tickWaitingEndAck(int64_t nowMs);

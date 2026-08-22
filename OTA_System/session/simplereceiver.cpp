@@ -69,6 +69,7 @@ ReceivedPacket tryReceiveOnce(ITransport &transport)
         result.sessionId = fields.session_id;
         result.sequence = fields.sequence;
         result.resultCode = fields.result_code;
+        result.acknowledgedType = fields.acknowledged_type;
         break;
     }
     case OTA_PKT_DISCOVER:

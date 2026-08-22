@@ -369,6 +369,235 @@ void batchSendingPollsAlreadyArrivedAckDuringSend()
     std::cout << "[OK] batchSendingPollsAlreadyArrivedAckDuringSend\n";
 }
 
+// [버그 수정 2026-08-20, ESP32 담당자 실기기 테스트로 발견] retransmitSlot()이
+// 재전송 직후 sleep_for(chunkDelayMs)만 하고 enterSendingBatch()와 달리
+// recv()를 폴링하지 않던 버그 재현. NACK으로 재전송을 유발하면서, 그
+// 재전송분에 대한 ACK을 미리 큐에 넣어 둔다 — 옛 코드였다면 이 ACK은
+// retransmitSlot()의 sleep 구간엔 못 읽혀서 이 tick()이 끝난 시점엔 아직
+// ackedChunks==0이었을 것(다음 tick의 최상단 폴링에서야 반영). 수정 후엔
+// 재전송 직후 폴링 구간 안에서 같은 tick() 호출 중에 바로 소비된다.
+void retransmitSlotPollsForResponseDuringItsOwnDelay()
+{
+    const std::string path = writeTempFile("os_retxpoll.bin", repeat('J', 48 + 10)); // 2청크
+    constexpr uint32_t kSessionId = 0xAAAAAAAAu;
+
+    FakeTransport transport;
+    // chunkDelayMs=10 (내부 폴링 간격 5ms 기준 재전송 후 2번 폴링 기회) —
+    // 2청크/batchSize=2로 해서 seq1이 남아있는 채로 WaitingBatchAck에
+    // 머무는지까지 같이 확인한다.
+    OtaSession session(transport, /*batchSize=*/2, /*timeoutMs=*/300, /*maxRetry=*/5,
+                        /*chunkDelayMs=*/10);
+
+    session.start(path, 1, kSessionId, 1000);
+    transport.rxQueue.push_back(
+        makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_START, OTA_CONTROL_SEQUENCE));
+    session.tick(1010); // seq0,seq1 최초 전송 -> WaitingBatchAck
+    assert(transport.countSentOfType(OTA_PKT_DATA) == 2);
+
+    // seq0 NACK과, 재전송분에 대한 ACK을 순서대로 큐에 넣음 — 같은 tick()
+    // 안에서 NACK 처리(재전송) -> 재전송 직후 폴링 구간에서 이 ACK까지
+    // 바로 소비되는 게 기대 동작.
+    transport.rxQueue.push_back(
+        makeAckOrNack(OTA_PKT_NACK, kSessionId, OTA_PKT_DATA, 0, OTA_RESULT_INVALID_CRC));
+    transport.rxQueue.push_back(makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_DATA, 0));
+
+    session.tick(1020);
+    assert(transport.countSentOfType(OTA_PKT_DATA) == 3); // seq0 재전송 1회 추가
+    assert(session.progress().ackedChunks == 1); // 재전송 직후 폴링에서 바로 반영돼야 함
+    assert(session.state() == OtaSessionState::WaitingBatchAck); // seq1은 아직 응답 대기 중
+
+    // 나머지도 정상 진행되는지(잔여 로직 안 깨졌는지) 확인
+    transport.rxQueue.push_back(makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_DATA, 1));
+    session.tick(1030);
+    assert(session.state() == OtaSessionState::WaitingEndAck);
+
+    std::remove(path.c_str());
+    std::cout << "[OK] retransmitSlotPollsForResponseDuringItsOwnDelay\n";
+}
+
+// [버그 수정 2026-08-20, ESP32 담당자 실기기 테스트로 발견] enterSendingBatch()가
+// 배치 안 모든 슬롯의 sentAtMs를 배치 "시작" 시각(nowMs 파라미터) 하나로
+// 통일해서 찍던 버그 재현. slot0은 곧바로 ACK되게 하고, slot1은 응답 없이
+// 놔둔 채 "slot1이 실제로 보내진 시각(진입 시각 + chunkDelayMs) 기준으로는
+// 아직 타임아웃 전이지만, 옛 버그(배치 진입 시각 기준)로 계산하면 이미
+// 타임아웃"인 nowMs를 골라서 tick()했을 때 불필요한 재전송이 안 나가는지
+// 확인한다. 옛 코드였다면 이 tick에서 DATA가 한 번 더(3번째) 나갔을 것.
+void batchSlotsGetIndividualSentAtMsNotSharedBatchStart()
+{
+    const std::string path = writeTempFile("os_slotstamp.bin", repeat('K', 48 + 10)); // 2청크
+    constexpr uint32_t kSessionId = 0xBBBBBBBBu;
+
+    FakeTransport transport;
+    // chunkDelayMs=40 -> slot1은 배치 진입보다 실제로 ~40ms 늦게 나감.
+    // timeoutMs=50으로 잡아서 "배치 진입 시각 기준(버그)"과 "slot1 실제
+    // 전송 시각 기준(정상)" 사이 폭에서 둘의 타임아웃 판정이 갈리게 한다.
+    OtaSession session(transport, /*batchSize=*/2, /*timeoutMs=*/50, /*maxRetry=*/5,
+                        /*chunkDelayMs=*/40);
+
+    session.start(path, 1, kSessionId, /*nowMs=*/1000);
+    transport.rxQueue.push_back(
+        makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_START, OTA_CONTROL_SEQUENCE));
+
+    session.tick(1010); // Handshaking -> SendingBatch(slot0@1010, slot1@~1050) -> WaitingBatchAck
+    assert(session.state() == OtaSessionState::WaitingBatchAck);
+    assert(transport.countSentOfType(OTA_PKT_DATA) == 2); // seq0, seq1 최초 전송만
+
+    // slot0(seq0)만 ACK
+    transport.rxQueue.push_back(makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_DATA, 0));
+    session.tick(1050);
+    assert(session.progress().ackedChunks == 1);
+
+    // slot1(seq1)은 응답 없음. nowMs=1080: slot1의 "실제" 전송 시각(~1050)
+    // 기준으로는 30ms만 지나 타임아웃(50ms) 전이지만, 옛 버그의 "배치 진입
+    // 시각(1010)" 기준으로는 70ms 지나 이미 타임아웃이었을 시점.
+    session.tick(1080);
+    assert(session.state() == OtaSessionState::WaitingBatchAck);
+    assert(transport.countSentOfType(OTA_PKT_DATA) == 2); // 아직 재전송 없어야 함(수정 후)
+
+    // 이제 정상적으로 응답 -> 완료 진행 확인(잔여 로직 안 깨졌는지)
+    transport.rxQueue.push_back(makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_DATA, 1));
+    session.tick(1090);
+    assert(session.state() == OtaSessionState::WaitingEndAck);
+
+    std::remove(path.c_str());
+    std::cout << "[OK] batchSlotsGetIndividualSentAtMsNotSharedBatchStart\n";
+}
+
+// [버그 수정 2026-08-20, ESP32 담당자 리포트 클레임 1] START ACK를 기다리는
+// 중에 sessionId/sequence(OTA_CONTROL_SEQUENCE)는 맞지만 acknowledged_type이
+// START가 아닌(END인 척하는) ACK가 와도 이걸 START 응답으로 착각해서 넘어가면
+// 안 된다 — OTA_CONTROL_SEQUENCE 값만으로는 START/END 응답을 구분할 수 없어서
+// acknowledged_type까지 같이 확인해야 한다.
+void handshakeIgnoresAckWithWrongAcknowledgedType()
+{
+    const std::string path = writeTempFile("os_wrongtype1.bin", repeat('L', 10)); // 1청크
+    constexpr uint32_t kSessionId = 0xCCCCCCCCu;
+
+    FakeTransport transport;
+    OtaSession session(transport, 1, /*timeoutMs=*/300, /*maxRetry=*/5, 0);
+
+    session.start(path, 1, kSessionId, 1000);
+    assert(session.state() == OtaSessionState::Handshaking);
+
+    // sessionId/sequence는 맞지만 acknowledged_type이 END인 "가짜" START ACK
+    transport.rxQueue.push_back(
+        makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_END, OTA_CONTROL_SEQUENCE));
+    session.tick(1010);
+    assert(session.state() == OtaSessionState::Handshaking); // 아직 안 넘어가야 함
+
+    // 진짜 START ACK가 오면 정상적으로 다음 단계로
+    transport.rxQueue.push_back(
+        makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_START, OTA_CONTROL_SEQUENCE));
+    session.tick(1020);
+    assert(session.state() == OtaSessionState::WaitingBatchAck);
+
+    std::remove(path.c_str());
+    std::cout << "[OK] handshakeIgnoresAckWithWrongAcknowledgedType\n";
+}
+
+// pollAndApplyAckOrNack()에서도 마찬가지 — acknowledged_type이 DATA가 아니면
+// sequence 값이 우연히 배치 슬롯의 sequence와 같아도 그 슬롯에 매칭하면 안 됨.
+void batchIgnoresAckWithWrongAcknowledgedType()
+{
+    const std::string path = writeTempFile("os_wrongtype2.bin", repeat('M', 10)); // 1청크
+    constexpr uint32_t kSessionId = 0xDDDDDDDDu;
+
+    FakeTransport transport;
+    OtaSession session(transport, 1, /*timeoutMs=*/300, /*maxRetry=*/5, 0);
+
+    session.start(path, 1, kSessionId, 1000);
+    transport.rxQueue.push_back(
+        makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_START, OTA_CONTROL_SEQUENCE));
+    session.tick(1010); // DATA(seq0) 전송, WaitingBatchAck
+    assert(session.state() == OtaSessionState::WaitingBatchAck);
+
+    // sequence는 seq0(0)과 우연히 같지만 acknowledged_type이 START인 "가짜" ACK
+    transport.rxQueue.push_back(makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_START, 0));
+    session.tick(1020);
+    assert(session.progress().ackedChunks == 0); // 매칭되면 안 됨
+
+    // 진짜 DATA ACK가 오면 정상 반영
+    transport.rxQueue.push_back(makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_DATA, 0));
+    session.tick(1030);
+    assert(session.progress().ackedChunks == 1);
+
+    std::remove(path.c_str());
+    std::cout << "[OK] batchIgnoresAckWithWrongAcknowledgedType\n";
+}
+
+// [2026-08-20 추가, "Gateway ACK/NACK 로그 추가" 요청 대응] setOnLog()로 구독한
+// 콜백이 ACK/NACK/타임아웃 이벤트마다 실제로 호출되는지 확인. 메시지 문자열
+// 자체를 엄격히 검증하기보다("seq=0" 같은 부분 문자열만 확인), 콜백이 최소
+// 한 번은 의미 있게 불렸는지 + 관련 정보(sequence)가 담겼는지만 가볍게 확인.
+void logCallbackFiresOnNackAndAck()
+{
+    const std::string path = writeTempFile("os_logcb.bin", repeat('N', 10)); // 1청크
+    constexpr uint32_t kSessionId = 0xEEEEEEEEu;
+
+    FakeTransport transport;
+    OtaSession session(transport, 1, /*timeoutMs=*/300, /*maxRetry=*/5, 0);
+
+    std::vector<std::string> logs;
+    session.setOnLog([&logs](const std::string &msg) { logs.push_back(msg); });
+
+    session.start(path, 1, kSessionId, 1000);
+    transport.rxQueue.push_back(makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_START, OTA_CONTROL_SEQUENCE));
+    session.tick(1010); // START ACK -> 로그 1건 이상 기대
+    assert(!logs.empty());
+
+    // seq0 NACK -> 재전송 로그가 찍히는지 ("seq=0"과 "NACK"이 메시지 어딘가에 있어야 함)
+    logs.clear();
+    transport.rxQueue.push_back(
+        makeAckOrNack(OTA_PKT_NACK, kSessionId, OTA_PKT_DATA, 0, OTA_RESULT_INVALID_CRC));
+    session.tick(1020);
+    bool sawNackLog = false;
+    for (const auto &line : logs) {
+        if (line.find("seq=0") != std::string::npos && line.find("NACK") != std::string::npos)
+            sawNackLog = true;
+    }
+    assert(sawNackLog);
+
+    std::remove(path.c_str());
+    std::cout << "[OK] logCallbackFiresOnNackAndAck\n";
+}
+
+// [2026-08-20 추가, 실기기 재현 버그(design-notes 37절, seq=959) 대응]
+// 큐에 낡은 NACK과 그 뒤를 바로 잇는 최신 ACK이 "같은 순간에 이미 같이"
+// 쌓여 있으면, 예전엔 한 틱에 하나만 처리해서 ACK을 보려면 tick()을 한 번
+// 더 불러야 했다. drainAckOrNackQueue()로 고친 뒤에는 같은 tick() 한 번
+// 안에서 NACK(재전송 유발) 처리 -> 곧바로 ACK(acked=true) 처리까지 이어져야
+// 한다 — "완전히 해결"은 아니고(낡은 응답이 재시도 한도보다 많이 쌓이면
+// 여전히 실패할 수 있음, design-notes 37절 참고) "같은 틱 안에 이미 도착해
+// 있는 최신 정보를 더 빨리 보게 됐다"는 개선을 검증하는 테스트.
+void drainQueueSeesFreshAckInSameTickAsStaleNack()
+{
+    const std::string path = writeTempFile("os_drain.bin", repeat('O', 10)); // 1청크
+    constexpr uint32_t kSessionId = 0xFFFFFFFEu;
+
+    FakeTransport transport;
+    OtaSession session(transport, 1, /*timeoutMs=*/300, /*maxRetry=*/5, 0);
+
+    session.start(path, 1, kSessionId, 1000);
+    transport.rxQueue.push_back(
+        makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_START, OTA_CONTROL_SEQUENCE));
+    session.tick(1010); // DATA(seq0) 최초 전송 -> WaitingBatchAck
+    assert(transport.countSentOfType(OTA_PKT_DATA) == 1);
+
+    // seq0에 대한 "낡은" NACK과 그 직후의 "최신" ACK을 미리 같이 큐에 넣어둠
+    // — 실기기에서 CC1101 수신 버퍼에 두 응답이 함께 쌓여 있던 상황을 흉내.
+    transport.rxQueue.push_back(
+        makeAckOrNack(OTA_PKT_NACK, kSessionId, OTA_PKT_DATA, 0, OTA_RESULT_INVALID_CRC));
+    transport.rxQueue.push_back(makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_DATA, 0));
+
+    session.tick(1020); // 단 한 번의 tick() 안에서 NACK 처리(재전송)와 ACK 처리(acked)가 다 끝나야 함
+    assert(transport.countSentOfType(OTA_PKT_DATA) == 2); // NACK으로 인한 재전송 1회
+    assert(session.progress().ackedChunks == 1); // 같은 틱 안에서 ACK까지 반영됨
+    assert(session.state() == OtaSessionState::WaitingEndAck); // 1청크뿐이라 배치 완료 -> END로
+
+    std::remove(path.c_str());
+    std::cout << "[OK] drainQueueSeesFreshAckInSameTickAsStaleNack\n";
+}
+
 } // namespace
 
 int main()
@@ -381,6 +610,12 @@ int main()
     endNackGoesDirectlyToFailedWithoutRetry();
     resumeDoesNotCauseSpuriousTimeout();
     batchSendingPollsAlreadyArrivedAckDuringSend();
+    retransmitSlotPollsForResponseDuringItsOwnDelay();
+    batchSlotsGetIndividualSentAtMsNotSharedBatchStart();
+    handshakeIgnoresAckWithWrongAcknowledgedType();
+    batchIgnoresAckWithWrongAcknowledgedType();
+    logCallbackFiresOnNackAndAck();
+    drainQueueSeesFreshAckInSameTickAsStaleNack();
     std::cout << "\n모든 테스트 통과\n";
     return 0;
 }

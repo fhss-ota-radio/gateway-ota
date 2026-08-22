@@ -7,12 +7,24 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <thread>
 
 extern "C" {
 #include "ota_protocol.h"
 }
+
+namespace {
+// 로그 메시지에 session_id를 사람이 읽기 좋은 8자리 16진수로 찍기 위한 헬퍼
+// (2026-08-20, "Gateway ACK/NACK 로그 추가" 대응).
+std::string toHex(uint32_t value)
+{
+    char buf[9];
+    std::snprintf(buf, sizeof(buf), "%08X", value);
+    return std::string(buf);
+}
+} // namespace
 
 int64_t otaSessionNowMs()
 {
@@ -57,7 +69,18 @@ void OtaSession::setState(OtaSessionState s)
 void OtaSession::fail(const std::string &reason)
 {
     m_errorMessage = reason;
+    log("FAIL: " + reason);
     setState(OtaSessionState::Failed);
+}
+
+// [2026-08-20 추가, "Gateway ACK/NACK 로그 추가" 요청 대응] m_onLog가 설정돼
+// 있으면 그대로 전달, 없으면 조용히 무시. ACK/NACK 수신·재전송·타임아웃처럼
+// StateCallback(상태 전환)만으로는 안 보이는 "WaitingBatchAck 안에서 무슨
+// 일이 있었는지"를 실기기 테스트 중 바로 확인하기 위한 진단용 훅.
+void OtaSession::log(const std::string &msg) const
+{
+    if (m_onLog)
+        m_onLog(msg);
 }
 
 // ============================================================================
@@ -152,16 +175,28 @@ void OtaSession::tickHandshaking(int64_t nowMs)
 
     // START/END에 대한 응답은 "제어 패킷 자체에 대한 응답"이라 sequence 자리에
     // OTA_CONTROL_SEQUENCE가 옴 (simplesender.cpp performHandshake()와 동일 규칙).
+    //
+    // [버그 수정 2026-08-20, ESP32 담당자 리포트 클레임 1] acknowledged_type도
+    // 같이 확인한다. 예전엔 sessionId+sequence만 봤는데, OTA_CONTROL_SEQUENCE가
+    // START/END 응답 둘 다에 쓰이는 값이라(ota_protocol.h 규칙) 이론상 END에
+    // 대한 응답을 START 응답으로 잘못 받아들일 여지가 있었다(sequence 공간이
+    // 완전히 안 나뉘어 있었던 지점). 실제로 재현된 적은 없지만(START/END는
+    // 시간상 겹칠 일이 없어서), 프로토콜이 명시적으로 실어 보내는 정보를
+    // 검증 안 하고 버리는 건 잠재 버그라 이번에 같이 잠근다.
     const bool matchesOurStart =
-        packet.sessionId == m_sessionId && packet.sequence == OTA_CONTROL_SEQUENCE;
+        packet.sessionId == m_sessionId && packet.sequence == OTA_CONTROL_SEQUENCE
+        && packet.acknowledgedType == static_cast<uint8_t>(OTA_PKT_START);
 
     if (packet.kind == ReceivedPacketKind::Ack && matchesOurStart) {
+        log("START ACK 수신 (session_id=0x" + toHex(m_sessionId) + ") -> 배치 전송 시작");
         enterSendingBatch(nowMs);
         return;
     }
     if (packet.kind == ReceivedPacketKind::Nack && matchesOurStart) {
         // 상대가 START 자체를 거부함 — 왜 거부했는지 판단하는 로직은 아직 없어서
         // (result_code별 분기는 향후 과제) 재시도로 취급.
+        log("START NACK 수신 (result_code=" + std::to_string(static_cast<int>(packet.resultCode))
+            + ")");
         if (++m_controlRetryCount > m_maxRetry) {
             fail("핸드셰이크 실패 — NACK, " + std::to_string(m_maxRetry) + "회 재시도 초과");
             return;
@@ -171,6 +206,8 @@ void OtaSession::tickHandshaking(int64_t nowMs)
         return;
     }
     if (nowMs - m_controlSentAtMs > m_timeoutMs) {
+        log("START 응답 타임아웃 (재시도 " + std::to_string(m_controlRetryCount + 1) + "/"
+            + std::to_string(m_maxRetry) + ")");
         if (++m_controlRetryCount > m_maxRetry) {
             fail("핸드셰이크 실패 — " + std::to_string(m_maxRetry) + "회 재시도 후에도 응답 없음");
             return;
@@ -204,16 +241,37 @@ void OtaSession::enterSendingBatch(int64_t nowMs)
     m_nextUnsentIndex += count;
     ++m_currentBatchNumber;
 
+    if (count > 0) {
+        log("배치 " + std::to_string(m_currentBatchNumber) + " 전송 시작 (seq="
+            + std::to_string(m_batch.front().sequence) + ".."
+            + std::to_string(m_batch.back().sequence) + ", " + std::to_string(count) + "개)");
+    }
+
     // 배치 안 청크를 처음부터 끝까지 순서대로 전부 전송 — 슬라이딩 윈도우가
     // 아니라 고정 크기 배치를 한꺼번에 다 쏘는 방식 (fsm-design.md §6).
     // 중간에 개별 ACK를 "기다리지"는 않지만(그러면 배치 방식 자체가 무의미),
     // 아래처럼 짧은 간격으로 폴링은 한다 — 이유는 바로 아래 주석.
+    // [버그 수정 2026-08-20] 예전에는 배치 안 모든 슬롯의 sentAtMs를 배치
+    // 시작 시각(nowMs) 하나로 통일해서 찍었다. 그런데 실제로는 슬롯마다
+    // chunkDelayMs(예: 40ms)씩 늦게 전송되므로, 배치 끝쪽 슬롯일수록
+    // "실제 보낸 시각"과 "기록된 sentAtMs" 사이 오차가 커진다(마지막
+    // 슬롯은 최대 (batchSize-1)*chunkDelayMs만큼 일찍 찍힘). 이 오차만큼
+    // tickWaitingBatchAck()의 타임아웃 판정(nowMs - slot.sentAtMs >
+    // m_timeoutMs)이 실제보다 일찍 만료된 것으로 오판해서, 응답이 아직
+    // 오는 중인데도 불필요하게 재전송했다 — ESP32 담당자가 실기기
+    // 테스트로 찾아냄. currentMs를 슬롯마다 실제로 쉰 만큼(step)
+    // 전진시켜서 각 슬롯의 sentAtMs가 "그 슬롯을 진짜로 보낸 시각"을
+    // 반영하게 한다. 시스템 시계(otaSessionNowMs())를 안 쓰고 nowMs
+    // 기준 논리 시계를 계속 쓰는 이유는 pollDuringDelay() 주석 참고 —
+    // 유닛테스트가 가짜 nowMs로 타임아웃을 검증하는 구조를 깨지 않기
+    // 위함.
+    int64_t currentMs = nowMs;
     for (auto &slot : m_batch) {
         if (!m_transport.send(slot.packet)) {
             fail("OTA_DATA 전송 실패 (sequence=" + std::to_string(slot.sequence) + ")");
             return;
         }
-        slot.sentAtMs = nowMs;
+        slot.sentAtMs = currentMs;
 
         // [효율 개선 2026-08-19] 예전에는 여기서 그냥 sleep_for(chunkDelayMs)만
         // 하고 recv()를 전혀 안 불렀다. 그런데 수신측은 DATA를 받자마자 바로
@@ -231,17 +289,8 @@ void OtaSession::enterSendingBatch(int64_t nowMs)
         // 맞아떨어진다. chunkDelayMs를 짧은 간격(kPollIntervalMs)으로
         // 쪼개서 그 사이사이 recv()를 폴링하면, 이미 도착한 ACK를 놓치지
         // 않고 바로 반영해서 불필요한 재전송을 줄일 수 있다.
-        if (m_chunkDelayMs > 0) {
-            constexpr int kPollIntervalMs = 5;
-            int remainingMs = m_chunkDelayMs;
-            while (remainingMs > 0) {
-                const int step = std::min(remainingMs, kPollIntervalMs);
-                std::this_thread::sleep_for(std::chrono::milliseconds(step));
-                remainingMs -= step;
-                if (!pollAndApplyAckOrNack(nowMs))
-                    return; // fail() 처리됨 — 배치 나머지 전송 중단
-            }
-        }
+        if (!pollDuringDelay(&currentMs))
+            return; // fail() 처리됨 — 배치 나머지 전송 중단
     }
 
     // [2026-08-19 추가했다가 같은 날 되돌림] 배치 전송 직후 flushRx()를
@@ -258,7 +307,7 @@ void OtaSession::enterSendingBatch(int64_t nowMs)
     setState(OtaSessionState::WaitingBatchAck);
 }
 
-bool OtaSession::retransmitSlot(BatchSlot &slot, int64_t nowMs)
+bool OtaSession::retransmitSlot(BatchSlot &slot, int64_t nowMs, const char *reason)
 {
     ++slot.retryCount;
     if (slot.retryCount > m_maxRetry) {
@@ -266,6 +315,8 @@ bool OtaSession::retransmitSlot(BatchSlot &slot, int64_t nowMs)
              std::to_string(slot.sequence) + ")");
         return false;
     }
+    log("seq=" + std::to_string(slot.sequence) + " 재전송 (사유=" + reason + ", 재시도 "
+        + std::to_string(slot.retryCount) + "/" + std::to_string(m_maxRetry) + ")");
     // RETRANSMITTING은 이 슬롯 하나 재전송하는 동안만 순간적으로 거쳐감
     // (fsm-design.md 상태 다이어그램: RETRANSMITTING -> WAITING_BATCH_ACK).
     setState(OtaSessionState::Retransmitting);
@@ -276,18 +327,41 @@ bool OtaSession::retransmitSlot(BatchSlot &slot, int64_t nowMs)
     // enterSendingBatch()는 청크 사이에 chunkDelayMs를 넣는데 여기만 빠져
     // 있었다 — 그래서 재전송이 쉬는 시간 없이 붙어 나갔고, 반이중인 CC1101이
     // 그동안 돌아온 ACK를 못 들었다(위 tickWaitingBatchAck() 주석 참고).
-    if (m_chunkDelayMs > 0)
-        std::this_thread::sleep_for(std::chrono::milliseconds(m_chunkDelayMs));
+    //
+    // [버그 수정 2026-08-20] 위 sleep_for()만 있고 recv() 폴링이 없었다 —
+    // enterSendingBatch()는 2026-08-19에 이미 폴링을 넣었는데(위 주석) 이
+    // 재전송 경로엔 그 수정이 빠져 있었다. ESP32 담당자가 실기기 테스트로
+    // 찾아냄: 재전송한 DATA에 대한 ACK/NACK이 바로 도착해도 이 sleep
+    // 구간 동안은 못 듣고 흘려보내서, 다음 tick의 타임아웃에서야(최악
+    // m_timeoutMs만큼 늦게) 반영됐다. enterSendingBatch()와 같은
+    // pollDuringDelay()를 재사용해서 여기도 5ms 간격으로 폴링하도록 맞춘다.
+    int64_t currentMs = nowMs;
+    if (!pollDuringDelay(&currentMs))
+        return false; // fail() 처리됨 (폴링 중 다른 슬롯이 재전송 한도 초과)
 
     setState(OtaSessionState::WaitingBatchAck);
     return true;
 }
 
-bool OtaSession::pollAndApplyAckOrNack(int64_t nowMs)
+bool OtaSession::pollAndApplyAckOrNack(int64_t nowMs, bool *hadPacket)
 {
     const auto packet = tryReceiveOnce(m_transport);
+    // 큐가 비어 있었는지(hadPacket=false) 뭔가 읽었는지(true)를 기록 —
+    // tryReceiveOnce()는 아직 도착한 게 없으면 kind==Unknown && raw가
+    // 빈 상태로 돌려준다(simplereceiver.h 주석). drainAckOrNackQueue()가
+    // 이 값으로 "더 읽을 게 남았는지" 판단한다.
+    if (hadPacket)
+        *hadPacket = !(packet.kind == ReceivedPacketKind::Unknown && packet.raw.empty());
+    // [버그 수정 2026-08-20, ESP32 담당자 리포트 클레임 1] acknowledged_type이
+    // OTA_PKT_DATA인 응답만 배치 슬롯에 매칭한다. 예전엔 이 필드를 확인 안
+    // 하고 sequence만 봤는데, sequence 하나만으로는 "이게 START/END에 대한
+    // 응답인데 우연히 지금 배치의 어느 슬롯 sequence와 같은 값이 되는" 경우를
+    // 걸러낼 수 없었다 — OTA_CONTROL_SEQUENCE가 작은 배치 sequence(0,1,2...)와
+    // 겹칠 수치는 아니라 실제로 재현되진 않았지만, 프로토콜이 명시적으로
+    // 실어 보내는 구분 정보를 검증 안 하고 버리는 건 잠재 버그였다.
     if ((packet.kind == ReceivedPacketKind::Ack || packet.kind == ReceivedPacketKind::Nack)
-        && packet.sessionId == m_sessionId) {
+        && packet.sessionId == m_sessionId
+        && packet.acknowledgedType == static_cast<uint8_t>(OTA_PKT_DATA)) {
         for (auto &slot : m_batch) {
             if (slot.acked || slot.sequence != packet.sequence)
                 continue;
@@ -297,10 +371,14 @@ bool OtaSession::pollAndApplyAckOrNack(int64_t nowMs)
             if (ok) {
                 slot.acked = true;
                 ++m_totalAcked;
+                log("seq=" + std::to_string(slot.sequence) + " ACK 수신 ("
+                    + std::to_string(m_totalAcked) + "/" + std::to_string(m_chunks.size()) + ")");
             } else {
+                log("seq=" + std::to_string(slot.sequence) + " NACK 수신 (result_code="
+                    + std::to_string(static_cast<int>(packet.resultCode)) + ")");
                 // NACK 이중 방어 — 타임아웃을 기다리지 않고 그 슬롯만 즉시 재전송
                 // (fsm-design.md §6 "슬롯별 독립 타이머 + NACK 이중 방어")
-                if (!retransmitSlot(slot, nowMs))
+                if (!retransmitSlot(slot, nowMs, "NACK"))
                     return false; // fail() 처리됨
             }
             break;
@@ -309,10 +387,78 @@ bool OtaSession::pollAndApplyAckOrNack(int64_t nowMs)
     return true;
 }
 
+bool OtaSession::drainAckOrNackQueue(int64_t nowMs)
+{
+    // [2026-08-20 추가, 실기기 재현 버그 수정] 왜 필요한가: ESP32는 배치가
+    // 아직 안 끝났으면 500ms 간격으로 "아직 못 받음" NACK을 반복 전송한다.
+    // 그 사이 실제 데이터가 도착해서 성공 ACK이 뒤따라오면, 파이의 CC1101
+    // 커널 드라이버 수신 버퍼(RX 큐)에는 낡은 NACK 여러 개와 최신 ACK이
+    // 같이 쌓인다. 예전에는 tickWaitingBatchAck()이 한 틱에 딱 하나만
+    // 읽었는데, 그러면 낡은 NACK들을 하나씩 처리하며 재시도 횟수(retryCount)
+    // 를 다 써버리고, 정작 바로 뒤에 있는 최신 ACK은 다음 틱에서야(혹은
+    // 재시도 한도 초과로 아예 못 보고) 처리됐다.
+    //
+    // 2026-08-20 실기기 로그(design-notes 37절, seq=959)로 실제 실패가
+    // 확인됨: ESP32는 이미 ACK을 두 번 보냈는데, Gateway는 그 앞에 쌓여
+    // 있던 낡은 NACK 2개를 처리하다 재시도 한도를 넘겨 실패로 끝났다.
+    //
+    // 큐가 빌 때까지(또는 fail() 나거나 한도에 닿을 때까지) 계속 드레인하면,
+    // 같은 틱 안에서 "낡은 NACK 처리 -> 재전송" 다음에 바로 "최신 ACK 처리
+    // -> acked=true"까지 이어져서, 최신 정보가 항상 마지막에 반영된다.
+    constexpr int kMaxDrainPerTick = 32; // 오작동한 transport가 recv()에서
+        // 절대 빈 값을 안 주는 경우에도 무한루프에 빠지지 않기 위한 안전판.
+        // 배치 크기(기본 5)보다 충분히 크게 잡음 — 슬롯 수보다 훨씬 많은
+        // 중복/낡은 응답이 한꺼번에 쌓이는 경우는 실제로 없었음.
+    for (int i = 0; i < kMaxDrainPerTick; ++i) {
+        bool hadPacket = false;
+        if (!pollAndApplyAckOrNack(nowMs, &hadPacket))
+            return false; // fail() 처리됨
+        if (!hadPacket)
+            break; // 큐가 비었음 — 더 읽을 게 없음
+    }
+    return true;
+}
+
+bool OtaSession::pollDuringDelay(int64_t *nowMs)
+{
+    if (m_chunkDelayMs <= 0)
+        return true;
+
+    // [2026-08-20 추가] enterSendingBatch()와 retransmitSlot() 둘 다 쓰던
+    // "5ms 간격 쪼개기 + 폴링" 로직을 여기 하나로 합쳤다(예전엔
+    // enterSendingBatch()에만 있고 retransmitSlot()엔 없어서 버그였다 —
+    // 위 retransmitSlot() 주석 참고).
+    //
+    // *nowMs를 실제로 잠든 만큼(step)만 전진시키는 이유: 여기서
+    // otaSessionNowMs()(진짜 시스템 시계)를 부르면 더 "정확"해 보이지만,
+    // 유닛테스트는 tick()에 작은 가짜 정수(예: 1010)를 nowMs로 넘겨서
+    // sleep 없이 타임아웃 로직을 검증하는 구조다. 여기서 진짜 시계를
+    // 섞으면 tickWaitingBatchAck()의 `nowMs - slot.sentAtMs` 계산이
+    // (가짜 nowMs) - (진짜 큰 시스템 시각)처럼 뒤섞여서 타임아웃 판정이
+    // 깨진다. 그래서 "호출한 쪽이 준 시간 기준을 그대로 유지한 채, 실제
+    // 잠든 시간(ms)만큼만 더한다" — 진짜 하드웨어에서는 이 값이 곧
+    // 실제 흐른 시간과 같고, 테스트에서는 가짜 기준 위에서 논리적으로
+    // 같은 양만큼만 전진하므로 두 쪽 다 옳게 동작한다.
+    constexpr int kPollIntervalMs = 5;
+    int remainingMs = m_chunkDelayMs;
+    while (remainingMs > 0) {
+        const int step = std::min(remainingMs, kPollIntervalMs);
+        std::this_thread::sleep_for(std::chrono::milliseconds(step));
+        remainingMs -= step;
+        *nowMs += step;
+        if (!pollAndApplyAckOrNack(*nowMs))
+            return false; // fail() 처리됨
+    }
+    return true;
+}
+
 void OtaSession::tickWaitingBatchAck(int64_t nowMs)
 {
-    // 1. 수신 확인 (논블로킹 폴링 — 한 틱에 패킷 하나만 처리, tryReceiveOnce와 동일 패턴)
-    if (!pollAndApplyAckOrNack(nowMs))
+    // 1. 수신 확인 — 큐에 쌓인 ACK/NACK을 빌 때까지 전부 드레인한다.
+    // [수정 2026-08-20] 예전엔 한 틱에 패킷 하나만 처리했는데, 그러면 낡은
+    // NACK 여러 개가 큐에 쌓여 있을 때 최신 ACK을 늦게 보거나 아예 재시도
+    // 한도 초과로 못 보는 문제가 있었다 — drainAckOrNackQueue() 주석 참고.
+    if (!drainAckOrNackQueue(nowMs))
         return; // fail() 처리됨
 
     // 2. 타임아웃 확인 — 아직 acked=false인 슬롯만.
@@ -336,7 +482,7 @@ void OtaSession::tickWaitingBatchAck(int64_t nowMs)
             continue;
         if (nowMs - slot.sentAtMs <= m_timeoutMs)
             continue;
-        if (!retransmitSlot(slot, nowMs))
+        if (!retransmitSlot(slot, nowMs, "timeout"))
             return; // fail() 처리됨
         break;      // 한 틱에 하나만 — 나머지는 다음 틱에서 다시 판정
     }
@@ -385,10 +531,14 @@ void OtaSession::enterWaitingEndAck(int64_t nowMs)
 void OtaSession::tickWaitingEndAck(int64_t nowMs)
 {
     const auto packet = tryReceiveOnce(m_transport);
+    // [2026-08-20, 위 tickHandshaking() matchesOurStart와 같은 이유] END 응답도
+    // acknowledged_type을 같이 확인해서 START 응답과 혼동될 여지를 없앤다.
     const bool matchesOurEnd =
-        packet.sessionId == m_sessionId && packet.sequence == OTA_CONTROL_SEQUENCE;
+        packet.sessionId == m_sessionId && packet.sequence == OTA_CONTROL_SEQUENCE
+        && packet.acknowledgedType == static_cast<uint8_t>(OTA_PKT_END);
 
     if (packet.kind == ReceivedPacketKind::Ack && matchesOurEnd) {
+        log("END ACK 수신 -> Completed (session_id=0x" + toHex(m_sessionId) + ")");
         setState(OtaSessionState::Completed);
         return;
     }
@@ -401,6 +551,8 @@ void OtaSession::tickWaitingEndAck(int64_t nowMs)
         return;
     }
     if (nowMs - m_controlSentAtMs > m_timeoutMs) {
+        log("END 응답 타임아웃 (재시도 " + std::to_string(m_controlRetryCount + 1) + "/"
+            + std::to_string(m_maxRetry) + ")");
         if (++m_controlRetryCount > m_maxRetry) {
             fail("OTA_END 실패 — " + std::to_string(m_maxRetry) + "회 재시도 후에도 응답 없음");
             return;

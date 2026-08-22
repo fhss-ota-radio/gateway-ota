@@ -63,9 +63,12 @@ bool parseHexDeviceId(const std::string &text, uint32_t *out)
 void printUsage(const char *argv0)
 {
     std::cerr << "사용법: " << argv0
-              << " <device_path> <bin_file> [target_device_id_hex] [batchSize] [chunkDelayMs]\n"
+              << " <device_path> <bin_file> [target_device_id_hex] [batchSize] [chunkDelayMs]"
+                 " [timeoutMs] [maxRetry]\n"
               << "  예: " << argv0 << " /dev/cc1101 firmware.bin\n"
-              << "  예: " << argv0 << " /dev/cc1101 firmware.bin ffffffff 5 40\n";
+              << "  예: " << argv0 << " /dev/cc1101 firmware.bin ffffffff 5 40\n"
+              << "  예(여유값, 2026-08-20 실기기에서 stale NACK로 재시도 한도 초과 관찰돼\n"
+              << "     추가됨): " << argv0 << " /dev/cc1101 firmware.bin ffffffff 5 40 600 8\n";
 }
 
 } // namespace
@@ -88,10 +91,17 @@ int main(int argc, char *argv[])
 
     const int batchSize = (argc >= 5) ? std::atoi(argv[4]) : 5;
     const int chunkDelayMs = (argc >= 6) ? std::atoi(argv[5]) : 40;
+    // [2026-08-20 추가] 기본값(300ms/5회, fsm-design.md 결정값)은 ESP32의
+    // "아직 못 받음" NACK 재전송 주기(500ms)보다 짧아서, 실기기에서 둘의
+    // 리듬이 어긋나며 재시도 예산을 너무 빨리 써버리는 경우가 관찰됨
+    // (design-notes 37절). 여유값이 필요하면 인자로 넘길 수 있게 함.
+    const int timeoutMs = (argc >= 7) ? std::atoi(argv[6]) : 300;
+    const int maxRetry = (argc >= 8) ? std::atoi(argv[7]) : 5;
 
     std::cout << "[smoke_session_send] device=" << devicePath << " file=" << binFile
               << " target=0x" << std::hex << targetDeviceId << std::dec
-              << " batchSize=" << batchSize << " chunkDelayMs=" << chunkDelayMs << "\n";
+              << " batchSize=" << batchSize << " chunkDelayMs=" << chunkDelayMs
+              << " timeoutMs=" << timeoutMs << " maxRetry=" << maxRetry << "\n";
 
     Cc1101Transport transport(devicePath);
     if (!transport.open()) {
@@ -103,13 +113,19 @@ int main(int argc, char *argv[])
     if (transport.startRx() != Cc1101Status::Ok)
         std::cerr << "[smoke_session_send] startRx 실패 — 응답 수신이 안 될 수 있음(계속 진행함)\n";
 
-    // 300ms/5회는 fsm-design.md 결정값 그대로 (핸드셰이크/배치/END 전부 통일).
-    OtaSession session(transport, batchSize, /*timeoutMs=*/300, /*maxRetry=*/5, chunkDelayMs);
+    OtaSession session(transport, batchSize, timeoutMs, maxRetry, chunkDelayMs);
 
     // 상태 전이마다 로그 — fsm-design.md §1 "화면과 로직의 경계" 원칙대로
     // OtaSession 자신은 콜백만 올리고, 여기(CLI, 화면 대신)서 로그로 소비함.
     session.setOnStateChanged([](OtaSessionState s) {
         std::cout << "[smoke_session_send] 상태 -> " << otaSessionStateName(s) << "\n";
+    });
+    // [2026-08-20 추가] ACK/NACK 수신·재전송·타임아웃마다 찍는 상세 로그 —
+    // 상태 전이 로그만으로는 WaitingBatchAck 안에서 무슨 일이 있었는지
+    // (몇 번 seq가 NACK/타임아웃으로 재전송됐는지) 전혀 안 보여서, 실기기
+    // 테스트에서 "어디서 막혔는지"를 바로 확인하기 위해 추가함.
+    session.setOnLog([](const std::string &msg) {
+        std::cout << "[smoke_session_send][log] " << msg << "\n";
     });
 
     if (!session.start(binFile, targetDeviceId)) {

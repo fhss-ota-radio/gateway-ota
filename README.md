@@ -24,8 +24,13 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
 | 1 | Qt 프로젝트 세팅 및 화면 뼈대 | ✅ 완료 |
 | 2 | 전송 계층 추상화 + `Cc1101Transport` | ✅ 완료 (실기기 1067/1067) |
 | 3 | BIN 분할 + CRC | ✅ 완료 |
-| 4 | 핸드셰이크 + 송수신 + ACK | 🟡 `OtaSession`(배치 ACK+선택적 재전송) 구현·유닛테스트 완료(2026-08-18) / **실기기 검증·화면 연결은 아직** |
+| 4 | 핸드셰이크 + 송수신 + ACK | 🟡 `OtaSession`(배치 ACK+선택적 재전송) 구현·**실기기 검증 완료**(SHA256 무결성·NACK 실발신·전송효율 개선까지 포함, 2026-08-19) + `DISCOVER`/`DISCOVER_ACK` 기기 탐색 구현(2026-08-20) / **`otamanager.cpp`(화면) 연결은 아직** |
 | 5 | 실기기 통합 검증 | ✅ 완료 — 전송 + 재조립 무결성 검증 통과 |
+
+> **✅ (2026-08-22) Pi→ESP32 실통합 OTA 전송 검증 완료**: `test/esp32-integration`
+> 브랜치에서 라즈베리파이 → ESP32 7829청크 전송, SHA256 무결성 확인,
+> 실기기 부팅까지 확인. `develop` 머지 준비 완료 — 상세는
+> `docs/note/design-notes-gateway-ota-es.md` 31~39절.
 
 > **무선 손실 약 0.75%는 재전송(마일스톤 4)으로 메워야 합니다.**
 > 재조립 로직은 바이트 단위로 정확함이 검증됐지만, 재전송이 없으면
@@ -115,7 +120,7 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
       빌드/실행법은
       [`docs/testing-spidev-transport.md`](docs/testing-spidev-transport.md) 참고.
 
-### 마일스톤 4 — `OtaSession`(FSM) — 배치 ACK + 선택적 재전송 (진행 중)
+### 마일스톤 4 — `OtaSession`(FSM) — 배치 ACK + 선택적 재전송 (거의 완료)
 - [x] **(2026-08-18)** `session/otasession.h/.cpp` — [`docs/fsm-design.md`](docs/fsm-design.md)의
       송신측 상태기계 구현체. `HANDSHAKING`→`SENDING_BATCH`→`WAITING_BATCH_ACK`↔`RETRANSMITTING`→`WAITING_END_ACK`→`COMPLETED`/`FAILED`,
       `PAUSED` 포함. `simplesender`/`simplereceiver`의 START/END 인코딩·수신 디코딩을
@@ -126,14 +131,78 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
   - `tick(nowMs)`를 시각 파라미터로 받는 구조 — Qt `QTimer`로 주기 호출하면
     되고, 테스트에서는 가짜 시각을 넣어 타임아웃을 실제로 기다리지 않고 검증
   - `tests/tst_otasession.cpp` — `FakeTransport`(인메모리)로 핸드셰이크/배치
-    ACK/NACK 즉시재전송/타임아웃재전송/재시도초과/END NACK/일시정지-재개 7개
-    시나리오 전부 통과 (g++ -std=c++17 확인, ctest 등록됨)
-- [ ] **실기기(라즈베리파이 2대) 검증 — 아직.** `simplereceiver.cpp`의
-      `sendAckFor()`가 현재 NACK을 실제로 안 보내서(항상 ACK만 생성), NACK
-      경로는 시뮬레이션으로만 확인됨
-- [ ] `DISCOVER`/`DISCOVER_ACK` 기기 조회 — `OtaSession`에 의도적으로 미포함
-      (연결·화면 담당 상위 흐름, `docs/roadmap.md` 3절 참고)
+    ACK/NACK 즉시재전송/타임아웃재전송/재시도초과/END NACK/일시정지-재개/
+    배치전송중폴링 8개 시나리오 전부 통과 (g++ -std=c++17 확인, ctest 등록됨)
+- [x] **실기기(라즈베리파이 2대) 검증 완료 (2026-08-19)** — 1067/1067 청크,
+      누락 0, SHA256 완전 일치. 드라이버 RX-정지 우회책 제거 후에도 재현.
+      전송 효율 개선(배치 전송 중 ACK 폴링 누락 수정)으로 중복 수신
+      1063개 → 5개(99.5%↓). `sendAckFor()`가 NACK을 실제로 안 보내던 버그도
+      발견·수정해 실기기로 진짜 NACK 왕복까지 확인. 상세: `docs/roadmap.md` 3절
+- [x] **`DISCOVER`/`DISCOVER_ACK` 기기 조회 구현 (2026-08-20)** —
+      `session/discovery.h/.cpp`의 `discoverDevices()`. `OtaSession`엔
+      의도적으로 미포함(연결·화면 담당 상위 흐름, `docs/roadmap.md` 3절 참고).
+      유닛테스트 5개 통과, **실기기(ESP32) 검증은 아직**
 - [ ] `otamanager.cpp`(화면)에 연결 — 미착수
+- [ ] **Pi → ESP32 실통합 OTA 전송 테스트 — 진행 중 (`test/esp32-integration`
+      브랜치)**. 지금까지는 라즈베리파이끼리만 검증됐고, 실제 소비자(ESP32)가
+      파일을 받아 적용하는 것은 아직 확인 전. 경위는
+      `docs/note/design-notes-gateway-ota-es.md` 31절
+- [x] **(2026-08-20) FSM 버그 2건 수정** — 첫 Pi↔ESP32 테스트 실패 후 ESP32
+      담당자가 보낸 버그 리포트(4건)를 코드로 직접 대조 검증, 확인된 2건만
+      수정: (1) `retransmitSlot()`이 재전송 직후 폴링 없이 그냥 대기하던
+      버그, (2) `enterSendingBatch()`가 배치 안 모든 슬롯의 전송 시각을
+      배치 진입 시각 하나로 통일해서 기록하던 버그(뒤쪽 슬롯일수록 타임아웃
+      오판 유발). 유닛테스트 2개 추가(옛 코드에서 실패 확인 후 수정 →
+      전체 10개 통과). 나머지 2건(응답 타입 미검증/stale NACK 재시도)은
+      근거 부족으로 보류. 상세: `docs/note/design-notes-gateway-ota-es.md` 34절
+- [x] **(2026-08-20) `acknowledged_type` 검증 추가** — 위에서 보류했던
+      "응답 타입 미검증" 항목. ACK/NACK이 어떤 패킷(START/DATA/END)에
+      대한 응답인지 확인 안 하고 sessionId+sequence만으로 매칭하던 부분에
+      `acknowledged_type` 검증을 추가(`ReceivedPacket.acknowledgedType`
+      필드 신설). 유닛테스트 2개 추가, 전체 12개 통과. 실기기 핸드셰이크
+      무응답은 ESP32를 OTA 메뉴에 수동 진입시켜야 하는 절차 문제로 추정 —
+      상세: `docs/note/design-notes-gateway-ota-es.md` 35절
+- [x] **(2026-08-20) Gateway ACK/NACK 진단 로그 추가** — `OtaSession`에
+      `StateCallback`과 같은 패턴의 `LogCallback`(`setOnLog()`)을 추가해서,
+      ACK/NACK 수신·재전송(사유: NACK/timeout)·배치 시작·타임아웃 재시도
+      마다 한 줄 로그가 찍히게 함. `tests/smoke_session_send_main.cpp`에
+      연결 완료(`otamanager.cpp` 쪽은 `feature/qt-ui-integration` 담당
+      영역이라 이번엔 제외). 유닛테스트 1개 추가, 전체 13개 통과. 상세:
+      `docs/note/design-notes-gateway-ota-es.md` 36절
+- [x] **(2026-08-20) 실기기 첫 전송 실패(seq=139, seq=959) 원인 규명 + 대응** —
+      Pi↔ESP32 실전송에서 재시도 한도 초과로 2회 연속 실패. Gateway·ESP32
+      양쪽 로그를 session_id로 대조해, Gateway의 자체 타임아웃(300ms)과
+      ESP32의 독립 NACK 재시도(500ms)가 같은 `retryCount` 예산을 중복으로
+      깎아먹는 것이 원인임을 확인(34절에서 보류했던 **클레임4** 실물 재현).
+      대응 두 가지: (1) CLI에 `timeoutMs`/`maxRetry` 인자 노출(여유값으로
+      재테스트 가능), (2) `drainAckOrNackQueue()` 추가 — 한 틱에 큐에 쌓인
+      ACK/NACK을 하나만 보던 걸 비거나 실패할 때까지 전부 처리하도록 변경.
+      회귀테스트 1개 추가(옛 코드 빌드로 실패 재현 확인 후 수정 코드로
+      통과 확인), 전체 14개 통과. **(2)는 큐에 여러 응답이 동시에 쌓인
+      경우만 커버하고, 시간차를 두고 따로 도착하는 경우는 (1)의 늘어난
+      예산이 방어선** — 둘을 같이 켠 채로 재테스트 예정. 상세:
+      `docs/note/design-notes-gateway-ota-es.md` 37절
+- [x] **(2026-08-22) 재테스트 성공(7829/7829, Completed) — SHA256 무결성 확인** —
+      두 완화책((1)CLI 재시도 여유값, (2)`drainAckOrNackQueue()`)을 같이 켠
+      상태로 Pi→ESP32 실전송 재시도, 세션 실패 0건으로 끝까지 완주.
+      ESP32 쪽 `ota_consumer_handle_end()`를 코드로 확인한 결과 SHA256
+      `memcmp`가 통과해야만 ACK을 보내는 구조라, Gateway 로그의
+      `END ACK 수신 -> Completed` 자체가 이미 무결성 확인 증거임을
+      확인 — 별도 ESP32 시리얼 로그 없이도 충분. 받은 펌웨어가 실제로
+      정상 부팅해 동작 중인 것도 ESP32 담당자가 확인. `retryPending`
+      (ESP32 담당자 제안 근본 수정)은 당장 급하지 않다고 판단, 백로그로
+      보류. **`develop` 머지 준비 완료.** 상세:
+      `docs/note/design-notes-gateway-ota-es.md` 38~39절
+- [ ] **⚠️ 알려진 이슈 (2026-08-22, 머지 보류 사유 아님)** — 배치 전송은
+      전부 성공(예: 7825/7825)했는데 마지막 `OTA_END`에만 응답이 완전히
+      없어 실패하는 사례 재현. 핸드셰이크 무응답(위 항목)과 달리 이건
+      DATA 단계 내내 정상 응답하던 중이라 원인이 다름 — `tickWaitingEndAck()`
+      가 `tickHandshaking()`처럼 틱마다 패킷 하나만 확인하는 옛 패턴이라
+      `drainAckOrNackQueue()` 미적용 상태인 건 확인했지만, 그것만으로
+      "몇 초간 완전 무응답"을 다 설명하긴 부족해 원인 미확정. 핵심 기능
+      (무결성 있는 전송 자체)은 여러 차례 확인됐고 이 건은 "완료 확인"
+      마지막 단계에서만 발생해 머지는 그대로 진행, 후속 조사로 트래킹.
+      상세: `docs/note/design-notes-gateway-ota-es.md` 40절
 
 ## 문서
 
