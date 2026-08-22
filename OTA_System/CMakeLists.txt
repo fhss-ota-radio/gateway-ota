@@ -60,6 +60,8 @@ add_library(ota_core STATIC
     session/otasession.cpp
     session/discovery.h
     session/discovery.cpp
+    session/fhssrollout.h
+    session/fhssrollout.cpp
     transport/itransport.h
     transport/cc1101_status.h
     transport/cc1101transport.h
@@ -153,6 +155,20 @@ target_link_libraries(ota_discovery_tests
         ota_core
 )
 add_test(NAME ota_discovery_tests COMMAND ota_discovery_tests)
+
+# ---------- ota_fhssrollout_tests: rolloutFhssConfig()(FHSS_CONFIG/ACTIVATE) 검증 ----------
+# 2026-08-22 착수. FakeTransport(인메모리)로 실기기 없이 성공/무응답 재시도
+# 실패/부분 실패(기기 여러 대 중 하나만 실패)/NACK 재시도 시나리오를 검증 —
+# ota_discovery_tests와 같은 패턴. 배경: docs/note/design-notes-gateway-ota-es.md
+# (gateway-ota 담당 FHSS 항목, firmware-esp32 develop 725b27d 대응).
+add_executable(ota_fhssrollout_tests
+    tests/tst_fhssrollout.cpp
+)
+target_link_libraries(ota_fhssrollout_tests
+    PRIVATE
+        ota_core
+)
+add_test(NAME ota_fhssrollout_tests COMMAND ota_fhssrollout_tests)
 
 # ---------- ota_smoke_send / ota_smoke_recv: 실기기(CC1101) 스모크테스트용 CLI ----------
 # /dev/cc1101이 실제로 있어야 동작하는 수동 실행 도구라서 add_test()에는 등록하지

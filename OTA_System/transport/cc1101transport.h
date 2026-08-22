@@ -46,6 +46,20 @@ public:
     Cc1101Status startRx();
     Cc1101Status flushTx();
 
+    // [2026-08-22 추가] FHSS(주파수 도약) 제어 — 커널 cc1101_ioctl.h의
+    // CC1101_IOC_FHSS_SET_CONFIG/START/STOP/GET_STATUS(ioctl 14~17)를 감싼다.
+    // 기존 setChannel() 등과 같은 자리(ITransport 계약 밖의 CC1101 전용 추가
+    // 메서드)에 둔다 — 무선칩 하나를 다루는 코드는 한 클래스에 모아둔다는
+    // 원칙, 새 클래스로 쪼개지 않는 이유는 cc1101transport.cpp 주석 참고.
+    //
+    // "지금 호핑 중인지"를 이 클래스가 별도 변수로 기억하지 않는다 — 그러면
+    // 실제 커널 상태와 어긋날 위험이 있어서, 필요할 때마다 getFhssStatus()로
+    // 커널에 직접 물어보는 쪽을 택했다(커널이 유일한 진실 공급원).
+    Cc1101Status configureFhss(const Cc1101FhssConfig &config);
+    Cc1101Status startFhss(Cc1101FhssRole role);
+    Cc1101Status stopFhss();
+    Cc1101FhssStatus getFhssStatus();
+
     // 마지막 recv() 성공 시 RSSI/LQI/CRC/수신시각 (cc1101-radio-api.md 4절)
     Cc1101RxMetadata lastRxMetadata() const { return m_lastRxMetadata; }
     // 마지막으로 실행한 동작의 상태값 (실패 원인 파악용)
