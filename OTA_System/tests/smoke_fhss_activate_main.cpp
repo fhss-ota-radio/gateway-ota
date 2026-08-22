@@ -13,14 +13,20 @@
 // 받아준다(design-notes-gateway-ota-es.md 41절 참고). 로터리 인코더로
 // OTA 메뉴 진입 후 실행할 것.
 //
-// [RF 프로필 값에 대한 주의] base_freq_hz/channel_spacing_hz/sync_word/
-// mdmcfg3·4/pktctrl0·1은 ota_protocol.h의 FHSS_CONFIG 패킷엔 안 실리는
-// "로컬 전용" 값이라 와이어로 검증할 방법이 없다 — 아래 기본값은
-// kernel-cc1101-spi의 팀 공용 베이스라인(cc1101_default_regs[], 433.92MHz)
-// 기준으로 잡은 추정치이고, sync_word만 gateway-ota README에 명시된 OTA
-// 전용 값(0x2D/0xD4)을 썼다. channel_spacing_hz(200kHz 추정)를 포함해
-// 실제 배포 전 통신 담당(팀원 4·5)과 반드시 재확인할 것 — 이 파일 어디에도
-// "검증된 값"이라고 주장하지 않는다.
+// [RF 프로필 값 — 2026-08-22 실기기 1차 실패로 정정됨] 처음엔
+// sync_word=0x2DD4(gateway-ota README의 "OTA 전용" 값)를 그대로 썼다가,
+// 실기기에서 프로토콜 핸드셰이크(CONFIG/ACTIVATE ACK)는 성공하고도 ESP32가
+// 5초 SYNC 타임아웃으로 MENU_OTA에 되돌아가는 걸 확인했다. ESP32
+// firmware-esp32의 rf_transport.c(s_433mhz_settings[])를 직접 읽어보니
+// **FHSS 호핑용 싱크워드는 0x2DD4가 아니라 팀 공용 값 0xD391**이었다 —
+// 0x2DD4는 "OTA가 채널 0에 고정돼 있을 때"만 쓰는 값이고, FHSS로 호핑하는
+// 채널들(1번 이상)은 팀 공용 싱크워드를 그대로 쓴다. 두 값을 헷갈리면
+// CONFIG/ACTIVATE 같은 상위 프로토콜은 다 성공해도(그건 아직 채널 0에서
+// 오가는 대화라 안 걸림) 실제 호핑 채널에서는 두 기기가 서로 다른
+// 싱크워드를 듣고 있어서 절대 무선으로 만날 수 없다 — 그래서 SYNC
+// 타임아웃만 계속 났던 것. base_freq_hz/channel_spacing_hz/mdmcfg/pktctrl은
+// firmware-esp32 값과 비교해 이미 일치(또는 오차 무시 가능한 수준)임을
+// 확인했다. 상세: design-notes-gateway-ota-es.md 42절.
 //
 // 사용법:
 //   ota_smoke_fhss_activate <device_path> <session_id_hex>
@@ -158,9 +164,11 @@ int main(int argc, char *argv[])
     Cc1101FhssConfig kernelConfig;
     kernelConfig.generation = generation;
     kernelConfig.algorithmId = 1; // CC1101_FHSS_ALGORITHM_SEEDED_PERMUTATION
-    kernelConfig.rfBaseFreqHz = 433920000u;      // 팀 공용 베이스라인(433.92MHz)
-    kernelConfig.rfChannelSpacingHz = 200000u;   // 추정치(~200kHz) — 재확인 필요
-    kernelConfig.rfSyncWord = 0x2DD4u;           // gateway-ota README의 OTA 전용 싱크워드
+    kernelConfig.rfBaseFreqHz = 433919830u;      // firmware-esp32 FREQ2/1/0=0x10/0xB0/0x71 실측 역산값
+    kernelConfig.rfChannelSpacingHz = 199951u;   // firmware-esp32 CHANSPC_E/M 실측 역산값
+    kernelConfig.rfSyncWord = 0xD391u;           // [2026-08-22 정정] FHSS 호핑 채널은 OTA 전용
+                                                   // 0x2DD4가 아니라 팀 공용 싱크워드 사용 — 위 파일
+                                                   // 상단 주석 참고
     kernelConfig.rfMdmcfg4 = 0xCA;
     kernelConfig.rfMdmcfg3 = 0x83;
     kernelConfig.rfPktctrl1 = 0x04;
