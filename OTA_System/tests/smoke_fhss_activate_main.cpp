@@ -123,6 +123,20 @@ int main(int argc, char *argv[])
         std::cerr << "transport open 실패: " << devicePath << "\n";
         return 1;
     }
+
+    // [2026-08-22 추가, 실기기에서 발견] FHSS 호핑은 이 프로세스가 끝나도
+    // 커널 드라이버 레벨에서 계속 돈다 — startFhss()를 부른 이전 실행이
+    // stopFhss()를 안 부르고 끝나면(이 도구는 의도적으로 자동으로 안 끔,
+    // 아래 종료 메시지 참고) 다음 실행이 시작될 때도 칩이 여전히
+    // 1~8번 채널을 계속 호핑 중이다. CONFIG/ACTIVATE는 채널 0으로 보내야
+    // 하는데 칩이 딴 채널에 가 있으면 ESP32가 물리적으로 못 듣는다 —
+    // 실제로 이 문제로 두 번째 실행부터 ConfigFailed(응답 완전 무응답)가
+    // 재현됐다. 그래서 매번 시작할 때 무조건 stopFhss() + 채널 0으로
+    // 명시적으로 맞추고 시작한다(실패해도 무시 — 애초에 호핑 중이
+    // 아니었으면 stopFhss()가 별 의미 없는 상태 오류를 반환할 수 있음).
+    (void)transport.stopFhss();
+    if (transport.setChannel(0) != Cc1101Status::Ok)
+        std::cerr << "setChannel(0) 실패 — 그래도 계속 진행\n";
     if (transport.startRx() != Cc1101Status::Ok)
         std::cerr << "startRx 실패 — 그래도 계속 진행\n";
 
