@@ -129,16 +129,41 @@ int main(int argc, char *argv[])
     // stopFhss()를 안 부르고 끝나면(이 도구는 의도적으로 자동으로 안 끔,
     // 아래 종료 메시지 참고) 다음 실행이 시작될 때도 칩이 여전히
     // 1~8번 채널을 계속 호핑 중이다. CONFIG/ACTIVATE는 채널 0으로 보내야
-    // 하는데 칩이 딴 채널에 가 있으면 ESP32가 물리적으로 못 듣는다 —
-    // 실제로 이 문제로 두 번째 실행부터 ConfigFailed(응답 완전 무응답)가
-    // 재현됐다. 그래서 매번 시작할 때 무조건 stopFhss() + 채널 0으로
-    // 명시적으로 맞추고 시작한다(실패해도 무시 — 애초에 호핑 중이
-    // 아니었으면 stopFhss()가 별 의미 없는 상태 오류를 반환할 수 있음).
-    (void)transport.stopFhss();
+    // 하는데 칩이 딴 채널에 가 있으면 ESP32가 물리적으로 못 듣는다.
+    //
+    // [2026-08-22 정정] kernel-cc1101-spi의 cc1101_fhss_stop()(cc1101_fhss.c
+    // 443~479행)을 직접 읽어보니, STOP 자체가 이미 내부적으로
+    // cc1101_switch_channel(reserved_channel)을 호출해 채널을 되돌린다 —
+    // 즉 아래 setChannel(0)은 이론상 중복 호출이다(reserved_channel=0으로
+    // 맞춰 배포했으므로). 그런데도 세 번째 실기기 시도가 여전히
+    // ConfigFailed로 실패해서, "이전 실행이 호핑 상태를 남겨뒀다" 가설이
+    // 진짜 원인이 맞는지 자체가 불확실해졌다. 그래서 추측 대신 매 실행마다
+    // stopFhss() 호출 결과와 getFhssStatus()를 CONFIG 전송 직전에 그대로
+    // 찍어서, 다음 실기기 로그에서 "정말 아직 호핑 중이었는지"를 눈으로
+    // 바로 확인할 수 있게 했다(design-notes-gateway-ota-es.md 42절 3차
+    // 시도 항목 참고 — ESP32 쪽 시리얼 로그도 이 판단에 필요함).
+    {
+        const auto beforeStop = transport.getFhssStatus();
+        std::cout << "[fhss_activate][diag] stopFhss 전: enabled=" << beforeStop.enabled
+                   << " synchronized=" << beforeStop.synchronized
+                   << " channel=" << static_cast<int>(beforeStop.currentChannel)
+                   << " role=" << static_cast<int>(beforeStop.role) << "\n";
+    }
+    const Cc1101Status stopResult = transport.stopFhss();
+    std::cout << "[fhss_activate][diag] stopFhss() 결과 코드=" << static_cast<int>(stopResult)
+               << " (0이 아니면 ioctl 자체가 실패한 것 — errno 기반 상태코드는 "
+               << "cc1101_status.h 참고)\n";
     if (transport.setChannel(0) != Cc1101Status::Ok)
         std::cerr << "setChannel(0) 실패 — 그래도 계속 진행\n";
     if (transport.startRx() != Cc1101Status::Ok)
         std::cerr << "startRx 실패 — 그래도 계속 진행\n";
+    {
+        const auto afterStop = transport.getFhssStatus();
+        std::cout << "[fhss_activate][diag] stopFhss+setChannel(0) 후: enabled="
+                   << afterStop.enabled << " synchronized=" << afterStop.synchronized
+                   << " channel=" << static_cast<int>(afterStop.currentChannel)
+                   << " role=" << static_cast<int>(afterStop.role) << "\n";
+    }
 
     FhssHopPolicy policy;
     policy.generation = generation;
