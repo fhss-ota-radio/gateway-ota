@@ -44,6 +44,13 @@
 
 namespace {
 
+// [2026-08-22, 실기기에서 발견] base=0(strtoul 자동 판별)으로 했더니
+// "0x" 접두어 없이 그냥 "A29E60"만 넘기면 첫 글자 'A'가 10진수로 무효라
+// 조용히 0으로 파싱되던 버그가 있었다(ConfigFailed로만 나와서 원인
+// 파악이 어려웠음). smoke_session_send_main.cpp의 parseHexDeviceId()와
+// 같은 관례로 맞춤 — base=16 명시(접두어 "0x"가 있어도 없어도 둘 다
+// 정상 동작, ota_smoke_discover 등 다른 CLI에서 쓰던 것과 같은 입력
+// 형식을 그대로 받을 수 있게).
 std::vector<uint32_t> parseTargetList(const std::string &csv)
 {
     std::vector<uint32_t> ids;
@@ -51,7 +58,7 @@ std::vector<uint32_t> parseTargetList(const std::string &csv)
     std::string token;
     while (std::getline(ss, token, ',')) {
         if (!token.empty())
-            ids.push_back(static_cast<uint32_t>(std::strtoul(token.c_str(), nullptr, 0)));
+            ids.push_back(static_cast<uint32_t>(std::strtoul(token.c_str(), nullptr, 16)));
     }
     return ids;
 }
@@ -79,12 +86,14 @@ int main(int argc, char *argv[])
     }
 
     const std::string devicePath = argv[1];
-    const uint32_t sessionId = static_cast<uint32_t>(std::strtoul(argv[2], nullptr, 0));
+    // session_id_hex/seed_hex는 이름대로 항상 16진수 — base=16 명시(위
+    // parseTargetList 주석과 같은 이유. "0x" 접두어 있어도/없어도 둘 다 됨).
+    const uint32_t sessionId = static_cast<uint32_t>(std::strtoul(argv[2], nullptr, 16));
     const std::vector<uint32_t> targets = parseTargetList(argv[3]);
     const uint32_t generation = static_cast<uint32_t>(std::strtoul(argv[4], nullptr, 0));
     const uint8_t channelCount = static_cast<uint8_t>(argc >= 6 ? std::strtoul(argv[5], nullptr, 0) : 8);
     const uint8_t firstChannel = static_cast<uint8_t>(argc >= 7 ? std::strtoul(argv[6], nullptr, 0) : 1);
-    const uint32_t seed = static_cast<uint32_t>(argc >= 8 ? std::strtoul(argv[7], nullptr, 0) : 0);
+    const uint32_t seed = static_cast<uint32_t>(argc >= 8 ? std::strtoul(argv[7], nullptr, 16) : 0);
     const int timeoutMs = argc >= 9 ? std::atoi(argv[8]) : 300;
     const int maxRetry = argc >= 10 ? std::atoi(argv[9]) : 5;
 
