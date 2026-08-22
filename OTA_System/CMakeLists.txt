@@ -224,6 +224,18 @@ target_link_libraries(ota_smoke_discover
         ota_core
 )
 
+# rolloutFhssConfig()(session/fhssrollout.h)로 실제 ESP32에 FHSS 설정을
+# 배포·활성화하고, Gateway 자신도 커널 호핑(MASTER)을 켜서 동기화 상태를
+# 지켜보는 CLI — 2026-08-22. RF 프로필 기본값에 대한 주의는
+# smoke_fhss_activate_main.cpp 상단 주석 참고(팀 재확인 필요한 추정치).
+add_executable(ota_smoke_fhss_activate
+    tests/smoke_fhss_activate_main.cpp
+)
+target_link_libraries(ota_smoke_fhss_activate
+    PRIVATE
+        ota_core
+)
+
 # ---------- tools/spidev: 진단 도구 (제품 코드 아님) ----------
 # SpidevTransport는 커널 드라이버(/dev/cc1101)를 우회해서 /dev/spidevX.Y로 CC1101을
 # 직접 폴링하는 ITransport 구현체입니다. "안 되는 원인이 하드웨어냐 커널이냐"를
