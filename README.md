@@ -181,6 +181,15 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
       경우만 커버하고, 시간차를 두고 따로 도착하는 경우는 (1)의 늘어난
       예산이 방어선** — 둘을 같이 켠 채로 재테스트 예정. 상세:
       `docs/note/design-notes-gateway-ota-es.md` 37절
+- [ ] **(2026-08-22) 재테스트 성공(7829/7829, Completed) — SHA256 확인은 아직** —
+      두 완화책((1)CLI 재시도 여유값, (2)`drainAckOrNackQueue()`)을 같이 켠
+      상태로 Pi→ESP32 실전송 재시도, 세션 실패 0건으로 끝까지 완주. 다만
+      ESP32가 무결성 확인 후 찍는 `END verified: session=...` 로그가
+      터미널 버퍼 소실로 유실돼, 이번 실행의 SHA256 일치는 아직 미확인.
+      로그를 파일로 남기며 재현 확인 1회 더 필요 — 완료되면 `develop`
+      머지 가능. `retryPending`(ESP32 담당자 제안 근본 수정)은 당장 급하지
+      않다고 판단, 백로그로 보류. 상세:
+      `docs/note/design-notes-gateway-ota-es.md` 38절
 
 ## 문서
 
