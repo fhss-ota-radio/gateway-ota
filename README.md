@@ -27,9 +27,10 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
 | 4 | 핸드셰이크 + 송수신 + ACK | 🟡 `OtaSession`(배치 ACK+선택적 재전송) 구현·**실기기 검증 완료**(SHA256 무결성·NACK 실발신·전송효율 개선까지 포함, 2026-08-19) + `DISCOVER`/`DISCOVER_ACK` 기기 탐색 구현(2026-08-20) / **`otamanager.cpp`(화면) 연결은 아직** |
 | 5 | 실기기 통합 검증 | ✅ 완료 — 전송 + 재조립 무결성 검증 통과 |
 
-> **🚧 진행 중 (2026-08-20)**: `test/esp32-integration` 브랜치에서 라즈베리파이
-> → ESP32 실통합 OTA 전송 테스트 준비 중 (지금까지는 라즈베리파이끼리만
-> 검증됨). 진행 상황은 `docs/note/design-notes-gateway-ota-es.md` 31절.
+> **✅ (2026-08-22) Pi→ESP32 실통합 OTA 전송 검증 완료**: `test/esp32-integration`
+> 브랜치에서 라즈베리파이 → ESP32 7829청크 전송, SHA256 무결성 확인,
+> 실기기 부팅까지 확인. `develop` 머지 준비 완료 — 상세는
+> `docs/note/design-notes-gateway-ota-es.md` 31~39절.
 
 > **무선 손실 약 0.75%는 재전송(마일스톤 4)으로 메워야 합니다.**
 > 재조립 로직은 바이트 단위로 정확함이 검증됐지만, 재전송이 없으면
@@ -181,15 +182,17 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
       경우만 커버하고, 시간차를 두고 따로 도착하는 경우는 (1)의 늘어난
       예산이 방어선** — 둘을 같이 켠 채로 재테스트 예정. 상세:
       `docs/note/design-notes-gateway-ota-es.md` 37절
-- [ ] **(2026-08-22) 재테스트 성공(7829/7829, Completed) — SHA256 확인은 아직** —
+- [x] **(2026-08-22) 재테스트 성공(7829/7829, Completed) — SHA256 무결성 확인** —
       두 완화책((1)CLI 재시도 여유값, (2)`drainAckOrNackQueue()`)을 같이 켠
-      상태로 Pi→ESP32 실전송 재시도, 세션 실패 0건으로 끝까지 완주. 다만
-      ESP32가 무결성 확인 후 찍는 `END verified: session=...` 로그가
-      터미널 버퍼 소실로 유실돼, 이번 실행의 SHA256 일치는 아직 미확인.
-      로그를 파일로 남기며 재현 확인 1회 더 필요 — 완료되면 `develop`
-      머지 가능. `retryPending`(ESP32 담당자 제안 근본 수정)은 당장 급하지
-      않다고 판단, 백로그로 보류. 상세:
-      `docs/note/design-notes-gateway-ota-es.md` 38절
+      상태로 Pi→ESP32 실전송 재시도, 세션 실패 0건으로 끝까지 완주.
+      ESP32 쪽 `ota_consumer_handle_end()`를 코드로 확인한 결과 SHA256
+      `memcmp`가 통과해야만 ACK을 보내는 구조라, Gateway 로그의
+      `END ACK 수신 -> Completed` 자체가 이미 무결성 확인 증거임을
+      확인 — 별도 ESP32 시리얼 로그 없이도 충분. 받은 펌웨어가 실제로
+      정상 부팅해 동작 중인 것도 ESP32 담당자가 확인. `retryPending`
+      (ESP32 담당자 제안 근본 수정)은 당장 급하지 않다고 판단, 백로그로
+      보류. **`develop` 머지 준비 완료.** 상세:
+      `docs/note/design-notes-gateway-ota-es.md` 38~39절
 
 ## 문서
 
