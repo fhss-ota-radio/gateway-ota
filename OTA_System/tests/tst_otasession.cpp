@@ -525,6 +525,42 @@ void batchIgnoresAckWithWrongAcknowledgedType()
     std::cout << "[OK] batchIgnoresAckWithWrongAcknowledgedType\n";
 }
 
+// [2026-08-20 추가, "Gateway ACK/NACK 로그 추가" 요청 대응] setOnLog()로 구독한
+// 콜백이 ACK/NACK/타임아웃 이벤트마다 실제로 호출되는지 확인. 메시지 문자열
+// 자체를 엄격히 검증하기보다("seq=0" 같은 부분 문자열만 확인), 콜백이 최소
+// 한 번은 의미 있게 불렸는지 + 관련 정보(sequence)가 담겼는지만 가볍게 확인.
+void logCallbackFiresOnNackAndAck()
+{
+    const std::string path = writeTempFile("os_logcb.bin", repeat('N', 10)); // 1청크
+    constexpr uint32_t kSessionId = 0xEEEEEEEEu;
+
+    FakeTransport transport;
+    OtaSession session(transport, 1, /*timeoutMs=*/300, /*maxRetry=*/5, 0);
+
+    std::vector<std::string> logs;
+    session.setOnLog([&logs](const std::string &msg) { logs.push_back(msg); });
+
+    session.start(path, 1, kSessionId, 1000);
+    transport.rxQueue.push_back(makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_START, OTA_CONTROL_SEQUENCE));
+    session.tick(1010); // START ACK -> 로그 1건 이상 기대
+    assert(!logs.empty());
+
+    // seq0 NACK -> 재전송 로그가 찍히는지 ("seq=0"과 "NACK"이 메시지 어딘가에 있어야 함)
+    logs.clear();
+    transport.rxQueue.push_back(
+        makeAckOrNack(OTA_PKT_NACK, kSessionId, OTA_PKT_DATA, 0, OTA_RESULT_INVALID_CRC));
+    session.tick(1020);
+    bool sawNackLog = false;
+    for (const auto &line : logs) {
+        if (line.find("seq=0") != std::string::npos && line.find("NACK") != std::string::npos)
+            sawNackLog = true;
+    }
+    assert(sawNackLog);
+
+    std::remove(path.c_str());
+    std::cout << "[OK] logCallbackFiresOnNackAndAck\n";
+}
+
 } // namespace
 
 int main()
@@ -541,6 +577,7 @@ int main()
     batchSlotsGetIndividualSentAtMsNotSharedBatchStart();
     handshakeIgnoresAckWithWrongAcknowledgedType();
     batchIgnoresAckWithWrongAcknowledgedType();
+    logCallbackFiresOnNackAndAck();
     std::cout << "\n모든 테스트 통과\n";
     return 0;
 }

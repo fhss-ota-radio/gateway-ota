@@ -7,12 +7,24 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <thread>
 
 extern "C" {
 #include "ota_protocol.h"
 }
+
+namespace {
+// 로그 메시지에 session_id를 사람이 읽기 좋은 8자리 16진수로 찍기 위한 헬퍼
+// (2026-08-20, "Gateway ACK/NACK 로그 추가" 대응).
+std::string toHex(uint32_t value)
+{
+    char buf[9];
+    std::snprintf(buf, sizeof(buf), "%08X", value);
+    return std::string(buf);
+}
+} // namespace
 
 int64_t otaSessionNowMs()
 {
@@ -57,7 +69,18 @@ void OtaSession::setState(OtaSessionState s)
 void OtaSession::fail(const std::string &reason)
 {
     m_errorMessage = reason;
+    log("FAIL: " + reason);
     setState(OtaSessionState::Failed);
+}
+
+// [2026-08-20 추가, "Gateway ACK/NACK 로그 추가" 요청 대응] m_onLog가 설정돼
+// 있으면 그대로 전달, 없으면 조용히 무시. ACK/NACK 수신·재전송·타임아웃처럼
+// StateCallback(상태 전환)만으로는 안 보이는 "WaitingBatchAck 안에서 무슨
+// 일이 있었는지"를 실기기 테스트 중 바로 확인하기 위한 진단용 훅.
+void OtaSession::log(const std::string &msg) const
+{
+    if (m_onLog)
+        m_onLog(msg);
 }
 
 // ============================================================================
@@ -165,12 +188,15 @@ void OtaSession::tickHandshaking(int64_t nowMs)
         && packet.acknowledgedType == static_cast<uint8_t>(OTA_PKT_START);
 
     if (packet.kind == ReceivedPacketKind::Ack && matchesOurStart) {
+        log("START ACK 수신 (session_id=0x" + toHex(m_sessionId) + ") -> 배치 전송 시작");
         enterSendingBatch(nowMs);
         return;
     }
     if (packet.kind == ReceivedPacketKind::Nack && matchesOurStart) {
         // 상대가 START 자체를 거부함 — 왜 거부했는지 판단하는 로직은 아직 없어서
         // (result_code별 분기는 향후 과제) 재시도로 취급.
+        log("START NACK 수신 (result_code=" + std::to_string(static_cast<int>(packet.resultCode))
+            + ")");
         if (++m_controlRetryCount > m_maxRetry) {
             fail("핸드셰이크 실패 — NACK, " + std::to_string(m_maxRetry) + "회 재시도 초과");
             return;
@@ -180,6 +206,8 @@ void OtaSession::tickHandshaking(int64_t nowMs)
         return;
     }
     if (nowMs - m_controlSentAtMs > m_timeoutMs) {
+        log("START 응답 타임아웃 (재시도 " + std::to_string(m_controlRetryCount + 1) + "/"
+            + std::to_string(m_maxRetry) + ")");
         if (++m_controlRetryCount > m_maxRetry) {
             fail("핸드셰이크 실패 — " + std::to_string(m_maxRetry) + "회 재시도 후에도 응답 없음");
             return;
@@ -212,6 +240,12 @@ void OtaSession::enterSendingBatch(int64_t nowMs)
     }
     m_nextUnsentIndex += count;
     ++m_currentBatchNumber;
+
+    if (count > 0) {
+        log("배치 " + std::to_string(m_currentBatchNumber) + " 전송 시작 (seq="
+            + std::to_string(m_batch.front().sequence) + ".."
+            + std::to_string(m_batch.back().sequence) + ", " + std::to_string(count) + "개)");
+    }
 
     // 배치 안 청크를 처음부터 끝까지 순서대로 전부 전송 — 슬라이딩 윈도우가
     // 아니라 고정 크기 배치를 한꺼번에 다 쏘는 방식 (fsm-design.md §6).
@@ -273,7 +307,7 @@ void OtaSession::enterSendingBatch(int64_t nowMs)
     setState(OtaSessionState::WaitingBatchAck);
 }
 
-bool OtaSession::retransmitSlot(BatchSlot &slot, int64_t nowMs)
+bool OtaSession::retransmitSlot(BatchSlot &slot, int64_t nowMs, const char *reason)
 {
     ++slot.retryCount;
     if (slot.retryCount > m_maxRetry) {
@@ -281,6 +315,8 @@ bool OtaSession::retransmitSlot(BatchSlot &slot, int64_t nowMs)
              std::to_string(slot.sequence) + ")");
         return false;
     }
+    log("seq=" + std::to_string(slot.sequence) + " 재전송 (사유=" + reason + ", 재시도 "
+        + std::to_string(slot.retryCount) + "/" + std::to_string(m_maxRetry) + ")");
     // RETRANSMITTING은 이 슬롯 하나 재전송하는 동안만 순간적으로 거쳐감
     // (fsm-design.md 상태 다이어그램: RETRANSMITTING -> WAITING_BATCH_ACK).
     setState(OtaSessionState::Retransmitting);
@@ -329,10 +365,14 @@ bool OtaSession::pollAndApplyAckOrNack(int64_t nowMs)
             if (ok) {
                 slot.acked = true;
                 ++m_totalAcked;
+                log("seq=" + std::to_string(slot.sequence) + " ACK 수신 ("
+                    + std::to_string(m_totalAcked) + "/" + std::to_string(m_chunks.size()) + ")");
             } else {
+                log("seq=" + std::to_string(slot.sequence) + " NACK 수신 (result_code="
+                    + std::to_string(static_cast<int>(packet.resultCode)) + ")");
                 // NACK 이중 방어 — 타임아웃을 기다리지 않고 그 슬롯만 즉시 재전송
                 // (fsm-design.md §6 "슬롯별 독립 타이머 + NACK 이중 방어")
-                if (!retransmitSlot(slot, nowMs))
+                if (!retransmitSlot(slot, nowMs, "NACK"))
                     return false; // fail() 처리됨
             }
             break;
@@ -401,7 +441,7 @@ void OtaSession::tickWaitingBatchAck(int64_t nowMs)
             continue;
         if (nowMs - slot.sentAtMs <= m_timeoutMs)
             continue;
-        if (!retransmitSlot(slot, nowMs))
+        if (!retransmitSlot(slot, nowMs, "timeout"))
             return; // fail() 처리됨
         break;      // 한 틱에 하나만 — 나머지는 다음 틱에서 다시 판정
     }
@@ -457,6 +497,7 @@ void OtaSession::tickWaitingEndAck(int64_t nowMs)
         && packet.acknowledgedType == static_cast<uint8_t>(OTA_PKT_END);
 
     if (packet.kind == ReceivedPacketKind::Ack && matchesOurEnd) {
+        log("END ACK 수신 -> Completed (session_id=0x" + toHex(m_sessionId) + ")");
         setState(OtaSessionState::Completed);
         return;
     }
@@ -469,6 +510,8 @@ void OtaSession::tickWaitingEndAck(int64_t nowMs)
         return;
     }
     if (nowMs - m_controlSentAtMs > m_timeoutMs) {
+        log("END 응답 타임아웃 (재시도 " + std::to_string(m_controlRetryCount + 1) + "/"
+            + std::to_string(m_maxRetry) + ")");
         if (++m_controlRetryCount > m_maxRetry) {
             fail("OTA_END 실패 — " + std::to_string(m_maxRetry) + "회 재시도 후에도 응답 없음");
             return;

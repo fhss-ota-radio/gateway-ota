@@ -111,6 +111,13 @@ int main(int argc, char *argv[])
     session.setOnStateChanged([](OtaSessionState s) {
         std::cout << "[smoke_session_send] 상태 -> " << otaSessionStateName(s) << "\n";
     });
+    // [2026-08-20 추가] ACK/NACK 수신·재전송·타임아웃마다 찍는 상세 로그 —
+    // 상태 전이 로그만으로는 WaitingBatchAck 안에서 무슨 일이 있었는지
+    // (몇 번 seq가 NACK/타임아웃으로 재전송됐는지) 전혀 안 보여서, 실기기
+    // 테스트에서 "어디서 막혔는지"를 바로 확인하기 위해 추가함.
+    session.setOnLog([](const std::string &msg) {
+        std::cout << "[smoke_session_send][log] " << msg << "\n";
+    });
 
     if (!session.start(binFile, targetDeviceId)) {
         std::cerr << "[smoke_session_send] start() 실패: " << session.errorMessage() << "\n";

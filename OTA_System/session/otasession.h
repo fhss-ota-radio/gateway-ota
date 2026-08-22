@@ -108,6 +108,15 @@ public:
     using StateCallback = std::function<void(OtaSessionState)>;
     void setOnStateChanged(StateCallback cb) { m_onStateChanged = std::move(cb); }
 
+    // [2026-08-20 추가] ACK/NACK 수신·재전송·타임아웃처럼 상태 전환보다
+    // 더 촘촘한 이벤트를 한 줄 문자열로 받는 콜백(선택). ESP32 실기기
+    // 테스트에서 "seq3 ACK 처리 실패"처럼 어디서 막히는지 겉으로 안 보여서
+    // (StateCallback만으로는 WaitingBatchAck 안에서 무슨 일이 있었는지
+    // 전혀 알 수 없음) 진단용으로 추가함 — CLI 스모크테스트는 stdout에,
+    // otamanager.cpp는 기존 로그 카드에 그대로 이어붙이면 됨.
+    using LogCallback = std::function<void(const std::string &)>;
+    void setOnLog(LogCallback cb) { m_onLog = std::move(cb); }
+
 private:
     struct BatchSlot
     {
@@ -127,6 +136,7 @@ private:
     OtaSessionState m_state = OtaSessionState::Idle;
     OtaSessionState m_pausedFrom = OtaSessionState::Idle;
     StateCallback m_onStateChanged;
+    LogCallback m_onLog;
     std::string m_errorMessage;
 
     uint32_t m_targetDeviceId = 0;
@@ -146,6 +156,8 @@ private:
 
     void setState(OtaSessionState s);
     void fail(const std::string &reason);
+    // m_onLog가 설정돼 있으면 그대로 전달, 아니면 조용히 무시.
+    void log(const std::string &msg) const;
 
     void enterHandshaking(int64_t nowMs);
     void tickHandshaking(int64_t nowMs);
@@ -154,7 +166,9 @@ private:
     void enterSendingBatch(int64_t nowMs); // 배치를 채우고 즉시 전부 전송 -> WaitingBatchAck
     void tickWaitingBatchAck(int64_t nowMs);
     // 슬롯 하나를 재전송. retryCount가 maxRetry를 넘으면 fail() 처리하고 false 반환.
-    bool retransmitSlot(BatchSlot &slot, int64_t nowMs);
+    // reason: 로그에만 쓰는 문자열("NACK"/"timeout") — 왜 재전송이 트리거됐는지
+    // 구분하기 위함(2026-08-20 로그 추가).
+    bool retransmitSlot(BatchSlot &slot, int64_t nowMs, const char *reason);
     // ACK/NACK 패킷 하나를 논블로킹으로 폴링해서, 있으면 현재 배치(m_batch)에
     // 반영한다(tickWaitingBatchAck()의 "1. 수신 확인" 단계와
     // enterSendingBatch()의 배치 전송 중 폴링이 이 로직을 공유하기 위해 분리함

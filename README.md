@@ -161,6 +161,13 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
       필드 신설). 유닛테스트 2개 추가, 전체 12개 통과. 실기기 핸드셰이크
       무응답은 ESP32를 OTA 메뉴에 수동 진입시켜야 하는 절차 문제로 추정 —
       상세: `docs/note/design-notes-gateway-ota-es.md` 35절
+- [x] **(2026-08-20) Gateway ACK/NACK 진단 로그 추가** — `OtaSession`에
+      `StateCallback`과 같은 패턴의 `LogCallback`(`setOnLog()`)을 추가해서,
+      ACK/NACK 수신·재전송(사유: NACK/timeout)·배치 시작·타임아웃 재시도
+      마다 한 줄 로그가 찍히게 함. `tests/smoke_session_send_main.cpp`에
+      연결 완료(`otamanager.cpp` 쪽은 `feature/qt-ui-integration` 담당
+      영역이라 이번엔 제외). 유닛테스트 1개 추가, 전체 13개 통과. 상세:
+      `docs/note/design-notes-gateway-ota-es.md` 36절
 
 ## 문서
 
