@@ -178,8 +178,14 @@ int main(int argc, char *argv[])
     policy.channelSwitchGuardUs = 5000;
 
     std::cout << "[fhss_activate] 1~2단계: FHSS_CONFIG -> FHSS_ACTIVATE 순차 배포 시작...\n";
+    // [2026-08-22 추가, 실기기 3차 ConfigFailed 디버깅용] 매 재시도마다
+    // transport.send() 성공 여부와, 대기 중 들어온 패킷(매칭 안 되는 것
+    // 포함)을 그대로 찍는다 — fhssrollout.h/.cpp의 FhssRolloutLogFn 참고.
+    const auto onRolloutLog = [](const std::string &msg) {
+        std::cout << "[fhss_activate][log] " << msg << "\n";
+    };
     const auto outcomes = rolloutFhssConfig(transport, sessionId, targets, policy,
-                                             timeoutMs, maxRetry);
+                                             timeoutMs, maxRetry, onRolloutLog);
 
     int activatedCount = 0;
     for (const auto &outcome : outcomes) {

@@ -2,9 +2,19 @@
 #define FHSSROLLOUT_H
 
 #include <cstdint>
+#include <functional>
+#include <string>
 #include <vector>
 
 class ITransport;
+
+// [2026-08-22 추가, 실기기 3차 ConfigFailed 디버깅용] 이 콜백이 있으면
+// CONFIG/ACTIVATE 왕복마다 "몇 번째 재시도인지, transport.send()가
+// 성공했는지, 대기 중 어떤 패킷이(매칭 여부와 무관하게) 들어왔는지"를
+// 문자열로 알려준다. 없으면(nullptr, 기본값) 아무것도 안 찍는다 — GUI
+// 앱이 이 함수를 그대로 재사용할 때 원치 않는 stdout 출력이 섞이지 않게
+// 하기 위함(OtaSession::setOnLog()와 같은 이유, otasession.h 참고).
+using FhssRolloutLogFn = std::function<void(const std::string &)>;
 
 // [설계 배경, 2026-08-22] gateway-ota 담당 "3. ESP32 설정 배포" +
 // "4. 모든 대상의 READY ACK 확인 후 활성화" 작업.
@@ -83,6 +93,6 @@ struct FhssRolloutOutcome
 std::vector<FhssRolloutOutcome> rolloutFhssConfig(
     ITransport &transport, uint32_t sessionId,
     const std::vector<uint32_t> &targetDeviceIds, const FhssHopPolicy &policy,
-    int timeoutMs = 300, int maxRetry = 5);
+    int timeoutMs = 300, int maxRetry = 5, const FhssRolloutLogFn &onLog = nullptr);
 
 #endif // FHSSROLLOUT_H
