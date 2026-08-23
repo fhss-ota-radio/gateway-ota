@@ -24,13 +24,19 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
 | 1 | Qt 프로젝트 세팅 및 화면 뼈대 | ✅ 완료 |
 | 2 | 전송 계층 추상화 + `Cc1101Transport` | ✅ 완료 (실기기 1067/1067) |
 | 3 | BIN 분할 + CRC | ✅ 완료 |
-| 4 | 핸드셰이크 + 송수신 + ACK | 🟡 `OtaSession`(배치 ACK+선택적 재전송) 구현·**실기기 검증 완료**(SHA256 무결성·NACK 실발신·전송효율 개선까지 포함, 2026-08-19) + `DISCOVER`/`DISCOVER_ACK` 기기 탐색 구현(2026-08-20) / **`otamanager.cpp`(화면) 연결은 아직** |
+| 4 | 핸드셰이크 + 송수신 + ACK | 🟡 `OtaSession`(배치 ACK+선택적 재전송) 구현·**실기기 검증 완료**(SHA256 무결성·NACK 실발신·전송효율 개선까지 포함, 2026-08-19) + `DISCOVER`/`DISCOVER_ACK` 기기 탐색 구현(2026-08-20) + **Qt 화면 연결 완료**(2026-08-20, 브로드캐스트만 — `feature/qt-ui-integration`에서 진행돼 2026-08-23 이 브랜치에 병합됨) |
 | 5 | 실기기 통합 검증 | ✅ 완료 — 전송 + 재조립 무결성 검증 통과 |
 
 > **✅ (2026-08-22) Pi→ESP32 실통합 OTA 전송 검증 완료**: `test/esp32-integration`
 > 브랜치에서 라즈베리파이 → ESP32 7829청크 전송, SHA256 무결성 확인,
 > 실기기 부팅까지 확인. `develop` 머지 준비 완료 — 상세는
 > `docs/note/design-notes-gateway-ota-es.md` 31~39절.
+
+> **🔀 (2026-08-23) `feature/qt-ui-integration` 병합** — 공통 조상(`75990aa`)
+> 이후 갈라져 있던 Qt 화면 연동(Connect/OtaSession 연결, 레이아웃)을
+> 이 브랜치(FHSS 백엔드 수정 + PR#5 머지)에 합침. 겹치는 파일이 README뿐이라
+> 충돌 없이 깔끔하게 합쳐짐 — 상세는
+> `docs/note/design-notes-gateway-ota-es.md` 43절.
 
 > **무선 손실 약 0.75%는 재전송(마일스톤 4)으로 메워야 합니다.**
 > 재조립 로직은 바이트 단위로 정확함이 검증됐지만, 재전송이 없으면
@@ -142,7 +148,18 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
       `session/discovery.h/.cpp`의 `discoverDevices()`. `OtaSession`엔
       의도적으로 미포함(연결·화면 담당 상위 흐름, `docs/roadmap.md` 3절 참고).
       유닛테스트 5개 통과, **실기기(ESP32) 검증은 아직**
-- [ ] `otamanager.cpp`(화면)에 연결 — 미착수
+- [x] **`otamanager.cpp`(화면)에 연결 (2026-08-20, `feature/qt-ui-integration`에서
+      진행 후 2026-08-23 이 브랜치에 병합)** — `OtaSession`/`Cc1101Transport`를
+      실제로 생성·연결. `setOnStateChanged()` 콜백 하나로 진행률바·로그·버튼
+      상태 갱신, `QTimer`(10ms)로 `tick()` 주기 호출. **지금은 브로드캐스트
+      전송만 실제로 동작** — 로컬 파일 드라이버(`LocalFileTransport` 미구현)와
+      유니캐스트(특정 기기 지정, `targetCombo`가 아직 자리표시자라 실제
+      device_id 매핑 불가)는 의도적으로 막아둠, 화면에 안내 로그 표시.
+      호핑 난수(FHSS seed) 입력 UI도 같이 추가(연결(Transport) 카드) — 값
+      입력/저장만 되고 실제 파이·ESP32 연동은 아직. 자세한 설계 이유는
+      `docs/note/design-notes-gateway-ota-es.md` 32~33절. **Qt6 없는 샌드박스에서
+      작성해 실제 빌드 검증 필요** — 다음 할 일: DISCOVER 연동(유니캐스트
+      활성화), FHSS rollout/hopping 연동
 - [ ] **Pi → ESP32 실통합 OTA 전송 테스트 — 진행 중 (`test/esp32-integration`
       브랜치)**. 지금까지는 라즈베리파이끼리만 검증됐고, 실제 소비자(ESP32)가
       파일을 받아 적용하는 것은 아직 확인 전. 경위는
