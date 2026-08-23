@@ -162,11 +162,22 @@
             </widget>
            </item>
            <item row="0" column="1">
-            <widget class="QComboBox" name="targetCombo">
-             <item><property name="text"><string>Node 01</string></property></item>
-             <item><property name="text"><string>Node 02</string></property></item>
-             <item><property name="text"><string>Node 03</string></property></item>
-            </widget>
+            <layout class="QHBoxLayout" name="targetRowLayout">
+             <item>
+              <widget class="QComboBox" name="targetCombo">
+               <!-- 2026-08-23: 자리표시자 "Node 01/02/03" 대신 비워둠 —
+                    discoverDevices() 결과로만 채워지고, 각 항목의 실제
+                    device_id(uint32_t)는 item data(Qt::UserRole)에 저장됨
+                    (표시 텍스트는 사람이 읽는 hex 문자열이라 파싱하지 않기
+                    위함). otamanager.cpp의 handleDiscoveredDevices() 참고. -->
+              </widget>
+             </item>
+             <item>
+              <widget class="QPushButton" name="discoverButton">
+               <property name="text"><string>기기 조회 (DISCOVER)</string></property>
+              </widget>
+             </item>
+            </layout>
            </item>
           </layout>
          </item>

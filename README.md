@@ -24,7 +24,7 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
 | 1 | Qt 프로젝트 세팅 및 화면 뼈대 | ✅ 완료 |
 | 2 | 전송 계층 추상화 + `Cc1101Transport` | ✅ 완료 (실기기 1067/1067) |
 | 3 | BIN 분할 + CRC | ✅ 완료 |
-| 4 | 핸드셰이크 + 송수신 + ACK | 🟡 `OtaSession`(배치 ACK+선택적 재전송) 구현·**실기기 검증 완료**(SHA256 무결성·NACK 실발신·전송효율 개선까지 포함, 2026-08-19) + `DISCOVER`/`DISCOVER_ACK` 기기 탐색 구현(2026-08-20) + **Qt 화면 연결 완료**(2026-08-20, 브로드캐스트만 — `feature/qt-ui-integration`에서 진행돼 2026-08-23 이 브랜치에 병합됨) |
+| 4 | 핸드셰이크 + 송수신 + ACK | 🟡 `OtaSession`(배치 ACK+선택적 재전송) 구현·**실기기 검증 완료**(SHA256 무결성·NACK 실발신·전송효율 개선까지 포함, 2026-08-19) + `DISCOVER`/`DISCOVER_ACK` 기기 탐색 구현(2026-08-20) + **Qt 화면 연결 완료**(2026-08-20, `feature/qt-ui-integration`에서 진행돼 2026-08-23 병합) + **DISCOVER 화면 연동 완료**(2026-08-23, 유니캐스트도 이제 실동작) |
 | 5 | 실기기 통합 검증 | ✅ 완료 — 전송 + 재조립 무결성 검증 통과 |
 
 > **✅ (2026-08-22) Pi→ESP32 실통합 OTA 전송 검증 완료**: `test/esp32-integration`
@@ -158,8 +158,24 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
       호핑 난수(FHSS seed) 입력 UI도 같이 추가(연결(Transport) 카드) — 값
       입력/저장만 되고 실제 파이·ESP32 연동은 아직. 자세한 설계 이유는
       `docs/note/design-notes-gateway-ota-es.md` 32~33절. **Qt6 없는 샌드박스에서
-      작성해 실제 빌드 검증 필요** — 다음 할 일: DISCOVER 연동(유니캐스트
-      활성화), FHSS rollout/hopping 연동
+      작성해 실제 빌드 검증 필요**
+- [x] **(2026-08-23) `startRx()` 누락 버그 수정 + DISCOVER 연동** — 병합해온
+      Connect 코드가 `Cc1101Transport::open()`만 부르고 `startRx()`(수신 대기로
+      전환하는 별도 ioctl)를 안 불러서, 연결은 됐다고 뜨는데 DISCOVER_ACK나
+      ACK/NACK를 하나도 못 받는 상태였음 — CLI 도구들은 전부 이 호출이 있는데
+      화면 코드에만 빠져 있었음. `onConnectClicked()`에 추가해서 고침. 그
+      위에서 `discoverButton`(새 UI) → `onDiscoverClicked()` → `discoverDevices()`를
+      연동함. `discoverDevices()`가 blocking 호출이라(1000ms 대기) 그대로
+      GUI 스레드에서 부르면 창이 얼어붙어서 `QThread::create()`로 워커
+      스레드에서 돌리고 `QMetaObject::invokeMethod(..., Qt::QueuedConnection)`로
+      결과를 GUI 스레드에 돌려줌. 조회 결과는 `targetCombo`에 채워지고
+      (표시는 "AA-BB-CC (fw x.y.z)", 실제 `device_id`는 item data에 저장),
+      `onStartClicked()`가 이제 유니캐스트일 때 그 값을 그대로 씀 — **이제
+      유니캐스트 전송도 실제로 동작함(브로드캐스트 제한 해제)**. 워커
+      스레드와 GUI 스레드가 같은 `m_transport`를 동시에 건드리지 않도록
+      조회 중엔 연결 해제·전송 시작을 막음. Qt6 없는 샌드박스라 실제 빌드
+      검증 필요. 상세: `docs/note/design-notes-gateway-ota-es.md` 44절 — 다음
+      할 일: FHSS rollout/hopping 연동
 - [ ] **Pi → ESP32 실통합 OTA 전송 테스트 — 진행 중 (`test/esp32-integration`
       브랜치)**. 지금까지는 라즈베리파이끼리만 검증됐고, 실제 소비자(ESP32)가
       파일을 받아 적용하는 것은 아직 확인 전. 경위는

@@ -15,7 +15,10 @@ extern "C" {
 #include <QRegularExpression>
 #include <QRegularExpressionValidator>
 #include <QSettings>
+#include <QThread>
 #include <QTimer>
+
+#include <cstdio>
 
 OtaManager::OtaManager(QWidget *parent)
     : QMainWindow(parent)
@@ -70,6 +73,7 @@ void OtaManager::setupConnections()
     connect(ui->startButton, &QPushButton::clicked, this, &OtaManager::onStartClicked);
     connect(ui->pauseButton, &QPushButton::clicked, this, &OtaManager::onPauseClicked);
     connect(ui->hopSeedRandomButton, &QPushButton::clicked, this, &OtaManager::onHopSeedRandomClicked);
+    connect(ui->discoverButton, &QPushButton::clicked, this, &OtaManager::onDiscoverClicked);
 
     // 호핑 난수(FHSS seed)는 uint32_t(0~4294967295) 범위라 QIntValidator(int
     // 범위, ~21억까지)로는 못 담아서 QRegularExpressionValidator로 숫자만
@@ -146,6 +150,12 @@ void OtaManager::onConnectClicked()
                       tr("전송이 진행 중입니다 — 완료/실패 후에 연결을 해제하세요"));
             return;
         }
+        if (m_discovering) {
+            // discoverDevices()를 돌리는 워커 스레드가 아직 m_transport를 쓰는
+            // 중이므로, 여기서 닫아버리면 다른 스레드가 닫힌 fd를 건드리게 됨.
+            appendLog(QStringLiteral("WARN"), tr("기기 조회가 끝난 뒤 연결을 해제하세요"));
+            return;
+        }
         m_session.reset();
         if (m_transport)
             m_transport->close();
@@ -175,6 +185,17 @@ void OtaManager::onConnectClicked()
                   tr("CC1101 연결 실패: %1 (경로/권한을 확인하세요)").arg(ui->portEdit->text()));
         return;
     }
+    // 2026-08-23에 발견해서 추가: open()은 문자 디바이스 fd만 여는 것이고,
+    // 실제로 "지금부터 수신 대기"로 CC1101 칩을 전환하는 건 별도 ioctl
+    // (CC1101_IOC_SET_RX, cc1101transport.cpp startRx() 참고)이라 여기서
+    // 빠져 있으면 DISCOVER_ACK/ACK/NACK을 하나도 못 받는다 — CLI 도구들
+    // (ota_smoke_discover 등)은 전부 open() 직후 startRx()를 부르는데
+    // 이 화면 코드엔 없었음. 상세 경위: design-notes-gateway-ota-es.md 44절
+    if (transport->startRx() != Cc1101Status::Ok) {
+        appendLog(QStringLiteral("ERROR"), tr("CC1101 연결 실패: startRx 실패"));
+        transport->close();
+        return;
+    }
     m_transport = std::move(transport);
 
     m_connected = true;
@@ -186,14 +207,15 @@ void OtaManager::onConnectClicked()
 
 void OtaManager::onModeChanged()
 {
-    ui->targetCombo->setEnabled(ui->unicastRadio->isChecked());
-    // 특정 기기 지정 전송은 DISCOVER 연동(기기 목록 → 실제 device_id 매핑) 후에나
-    // 가능함 — targetCombo가 지금은 "Node 01/02/03" 같은 자리표시자 문자열이라
-    // 실제 device_id로 못 바꿈. 진짜 막는 지점은 onStartClicked()에 있고, 여기선
-    // 미리 안내만 함
-    if (ui->unicastRadio->isChecked())
+    const bool unicast = ui->unicastRadio->isChecked();
+    ui->targetCombo->setEnabled(unicast);
+    ui->discoverButton->setEnabled(unicast);
+    // 2026-08-23: DISCOVER 연동 완료 — targetCombo가 discoverDevices() 결과로
+    // 채워지면 실제 device_id로 유니캐스트 전송 가능. 아직 조회를 안 했으면
+    // (targetCombo가 비어있으면) 안내만 하고, 진짜 막는 지점은 onStartClicked().
+    if (unicast && ui->targetCombo->count() == 0)
         appendLog(QStringLiteral("WARN"),
-                  tr("유니캐스트는 DISCOVER 연동 전까지 실제 전송이 안 됩니다 — 지금은 브로드캐스트만 가능"));
+                  tr("먼저 \"기기 조회 (DISCOVER)\"로 대상을 찾으세요"));
 }
 
 void OtaManager::onSelectFileClicked()
@@ -228,12 +250,26 @@ void OtaManager::onStartClicked()
         appendLog(QStringLiteral("WARN"), tr("이미 전송이 진행 중입니다"));
         return;
     }
-    // onModeChanged()에서 미리 경고했던 것과 같은 이유(targetCombo가 실제
-    // device_id로 못 바꾸는 자리표시자라서) — 여기가 실제로 막는 지점.
-    if (ui->unicastRadio->isChecked()) {
-        appendLog(QStringLiteral("WARN"),
-                  tr("특정 기기 지정 전송은 아직 지원되지 않습니다 — 브로드캐스트를 선택하세요"));
+    if (m_discovering) {
+        // DISCOVER 워커 스레드가 m_transport를 쓰는 중에 세션까지 같은
+        // transport로 send()/recv()를 시작하면 두 스레드가 fd를 동시에
+        // 건드리게 됨 — discoverDevices()가 끝날 때까지 기다리게 함.
+        appendLog(QStringLiteral("WARN"), tr("기기 조회가 끝난 뒤 다시 시도하세요"));
         return;
+    }
+    // 2026-08-23: DISCOVER 연동 완료 — targetCombo의 item data(Qt::UserRole)에
+    // handleDiscoveredDevices()가 실제 device_id(uint32_t)를 넣어두므로, 여기선
+    // 그 값을 그대로 씀. 유니캐스트인데 아직 아무것도 조회 못 했으면
+    // (targetCombo가 비어있으면 currentData()가 무효 QVariant) 여기서 막음.
+    uint32_t targetDeviceId = OTA_BROADCAST_DEVICE_ID;
+    if (ui->unicastRadio->isChecked()) {
+        const QVariant selected = ui->targetCombo->currentData();
+        if (!selected.isValid()) {
+            appendLog(QStringLiteral("WARN"),
+                      tr("먼저 \"기기 조회 (DISCOVER)\"로 대상을 찾은 뒤 목록에서 선택하세요"));
+            return;
+        }
+        targetDeviceId = selected.toUInt();
     }
 
     m_retransmitEventCount = 0;
@@ -243,9 +279,7 @@ void OtaManager::onStartClicked()
     m_session = std::make_unique<OtaSession>(*m_transport);
     m_session->setOnStateChanged([this](OtaSessionState state) { handleSessionStateChanged(state); });
 
-    // OTA_BROADCAST_DEVICE_ID 고정 — 위에서 unicastRadio면 이미 막고 리턴했으므로
-    // 여기 도달했다는 건 broadcastRadio가 체크된 상태
-    if (!m_session->start(m_selectedFilePath.toStdString(), OTA_BROADCAST_DEVICE_ID)) {
+    if (!m_session->start(m_selectedFilePath.toStdString(), targetDeviceId)) {
         appendLog(QStringLiteral("ERROR"),
                   tr("전송 시작 실패: %1").arg(QString::fromStdString(m_session->errorMessage())));
         m_session.reset();
@@ -362,4 +396,86 @@ void OtaManager::onHopSeedRandomClicked()
     const quint32 seed = QRandomGenerator::global()->generate();
     ui->hopSeedEdit->setText(QString::number(seed));
     appendLog(QStringLiteral("INFO"), tr("호핑 난수 무작위 생성: %1").arg(seed));
+}
+
+void OtaManager::onDiscoverClicked()
+{
+    if (!m_connected || !m_transport) {
+        appendLog(QStringLiteral("WARN"), tr("먼저 연결하세요"));
+        return;
+    }
+    if (m_discovering) {
+        appendLog(QStringLiteral("WARN"), tr("이미 기기 조회 중입니다"));
+        return;
+    }
+    if (m_session && m_session->state() != OtaSessionState::Idle
+        && m_session->state() != OtaSessionState::Completed
+        && m_session->state() != OtaSessionState::Failed) {
+        // OtaSession이 tick()마다 같은 m_transport로 send()/recv()를 하고
+        // 있는 도중에 discoverDevices()까지 같은 fd를 건드리면 응답이 서로
+        // 뒤섞일 수 있음 — 전송 중엔 조회를 막음.
+        appendLog(QStringLiteral("WARN"), tr("전송이 진행 중입니다 — 완료/실패 후에 조회하세요"));
+        return;
+    }
+
+    m_discovering = true;
+    ui->discoverButton->setEnabled(false);
+    ui->discoverButton->setText(tr("조회 중..."));
+    appendLog(QStringLiteral("INFO"), tr("DISCOVER 브로드캐스트 전송, 1000ms 대기..."));
+
+    // discoverDevices()는 blocking 호출임(discovery.h 33행 주석: "Qt 화면에서
+    // 쓸 때는 이 호출 자체를 별도 스레드로 돌리거나...") — GUI 스레드에서
+    // 그대로 부르면 대기하는 동안 창이 얼어붙는다(진행률 바·로그창도 멈춰
+    // 보임). QThread::create()로 워커 스레드에서 돌리고, 끝나면
+    // QMetaObject::invokeMethod(..., Qt::QueuedConnection)로 결과를 GUI
+    // 스레드로 다시 넘겨서 handleDiscoveredDevices()가 위젯을 건드리게 함
+    // (Qt 위젯은 자신을 만든 스레드에서만 건드려야 하므로).
+    //
+    // 스레드 안전성: discoverDevices()가 워커 스레드에서 m_transport(실제
+    // Cc1101Transport)를 send()/recv()하는 동안, GUI 스레드가 같은
+    // m_transport를 동시에 건드리면 안 됨 — 그래서 위에서 세션 진행 중이면
+    // 막았고, onStartClicked()/onConnectClicked() 쪽에도 m_discovering 검사를
+    // 추가해서 조회가 끝나기 전엔 세션 시작·연결 해제를 못 하게 막아둠.
+    ITransport *transport = m_transport.get();
+    QThread *worker = QThread::create([this, transport]() {
+        const std::vector<DiscoveredDevice> devices = discoverDevices(*transport, 1000);
+        QMetaObject::invokeMethod(
+            this, [this, devices]() { handleDiscoveredDevices(devices); }, Qt::QueuedConnection);
+    });
+    connect(worker, &QThread::finished, worker, &QObject::deleteLater);
+    worker->start();
+}
+
+void OtaManager::handleDiscoveredDevices(const std::vector<DiscoveredDevice> &devices)
+{
+    m_discovering = false;
+    ui->discoverButton->setEnabled(ui->unicastRadio->isChecked());
+    ui->discoverButton->setText(tr("기기 조회 (DISCOVER)"));
+
+    ui->targetCombo->clear();
+    if (devices.empty()) {
+        appendLog(QStringLiteral("WARN"), tr("조회된 기기가 없습니다"));
+        return;
+    }
+
+    for (const DiscoveredDevice &device : devices) {
+        // MAC 뒤 3byte를 "AA-BB-CC" 형식으로 보여줌 — CLI 도구들
+        // (smoke_discover_session_send_main.cpp의 displayDeviceId())과 같은
+        // 형식으로 맞춰서, 로그를 비교할 때 헷갈리지 않게 함
+        char idText[16];
+        std::snprintf(idText, sizeof(idText), "%02X-%02X-%02X",
+                      static_cast<unsigned>((device.deviceId >> 16) & 0xFFU),
+                      static_cast<unsigned>((device.deviceId >> 8) & 0xFFU),
+                      static_cast<unsigned>(device.deviceId & 0xFFU));
+        const QString label = tr("%1 (fw %2.%3.%4)")
+                                   .arg(QString::fromLatin1(idText))
+                                   .arg(device.fwMajor)
+                                   .arg(device.fwMinor)
+                                   .arg(device.fwPatch);
+        // 표시 텍스트는 사람이 읽는 형식이라 파싱하지 않고, 실제 device_id는
+        // item data(Qt::UserRole)에 그대로 넣어서 onStartClicked()가 문자열
+        // 파싱 없이 바로 씀
+        ui->targetCombo->addItem(label, QVariant(static_cast<quint32>(device.deviceId)));
+    }
+    appendLog(QStringLiteral("INFO"), tr("기기 %1개 조회됨").arg(devices.size()));
 }
