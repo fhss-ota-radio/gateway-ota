@@ -158,7 +158,18 @@ void OtaSession::sendStartPacket()
         fail("OTA_START 인코딩 실패");
         return;
     }
-    m_transport.send(std::vector<uint8_t>(packet, packet + written));
+    // [2026-08-23 추가, 실기기 FHSS 통합 테스트 디버깅용] 이전엔 이 결과를
+    // 그냥 버렸다 — FHSS 호핑 중에는 커널의 hop_worker가 매 슬롯 SYNC를
+    // 스스로 송신하는데, 그 순간과 겹치면 cc1101_write()가 -EBUSY를 그대로
+    // 돌려준다(kernel-cc1101-spi cc1101_main.c 315~318행: TX 중이면 write()가
+    // 즉시 -EBUSY). 이 실패를 조용히 삼키면 "패킷을 보냈다고 착각한 채
+    // 응답만 기다리다 타임아웃"이 되는데, slot_duration_us(300ms)와 이
+    // 세션의 기본 재시도 주기(timeoutMs=300ms)가 우연히 같아서 매 재시도가
+    // 똑같은 위상에서 계속 충돌할 수 있다(ESP32 담당자 진단, design-notes
+    // 42절 6차 시도 참고). 그래서 실패하면 반드시 로그로 남긴다.
+    if (!m_transport.send(std::vector<uint8_t>(packet, packet + written)))
+        log("OTA_START transport.send() 실패 — FHSS 호핑 중이면 hop_worker의 "
+            "SYNC 송신과 -EBUSY로 충돌했을 가능성 있음");
 }
 
 void OtaSession::enterHandshaking(int64_t nowMs)
@@ -320,7 +331,9 @@ bool OtaSession::retransmitSlot(BatchSlot &slot, int64_t nowMs, const char *reas
     // RETRANSMITTING은 이 슬롯 하나 재전송하는 동안만 순간적으로 거쳐감
     // (fsm-design.md 상태 다이어그램: RETRANSMITTING -> WAITING_BATCH_ACK).
     setState(OtaSessionState::Retransmitting);
-    m_transport.send(slot.packet);
+    if (!m_transport.send(slot.packet))
+        log("seq=" + std::to_string(slot.sequence) +
+            " 재전송 transport.send() 실패 — FHSS 호핑 중이면 -EBUSY 충돌 의심");
     slot.sentAtMs = nowMs;
 
     // [추가 2026-08-19] 재전송에도 배치 전송과 같은 간격을 둔다.
@@ -517,7 +530,10 @@ void OtaSession::sendEndPacket()
         fail("OTA_END 인코딩 실패");
         return;
     }
-    m_transport.send(std::vector<uint8_t>(packet, packet + written));
+    // [2026-08-23 추가] sendStartPacket()과 같은 이유 — send() 실패를
+    // 조용히 삼키지 않는다.
+    if (!m_transport.send(std::vector<uint8_t>(packet, packet + written)))
+        log("OTA_END transport.send() 실패 — FHSS 호핑 중이면 -EBUSY 충돌 의심");
 }
 
 void OtaSession::enterWaitingEndAck(int64_t nowMs)
