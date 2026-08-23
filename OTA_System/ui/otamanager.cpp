@@ -136,6 +136,18 @@ void OtaManager::saveSettings()
     settings.setValue(QStringLiteral("fhss/generation"), ui->fhssGenerationSpin->value());
 }
 
+Cc1101Transport *OtaManager::fhssTransport() const
+{
+    // m_transport의 정적 타입은 ITransport*(하드웨어 종류에 상관없이 쓰려고
+    // 일부러 그렇게 선언함, otamanager.h 참고)라서 stopFhss() 같은 CC1101
+    // 전용 메서드를 바로 못 부른다 — dynamic_cast로 실제로 가리키는 게
+    // Cc1101Transport가 맞는지 확인해서 그 타입의 포인터로 돌려줌. 지금은
+    // driverCombo가 CC1101일 때만 m_transport가 만들어지므로 항상 성공하지만,
+    // 호출부는 그래도 nullptr 가능성을 확인해야 함(로컬 파일 드라이버가
+    // 생기면 그때는 실제로 nullptr이 됨).
+    return dynamic_cast<Cc1101Transport *>(m_transport.get());
+}
+
 void OtaManager::appendLog(const QString &tag, const QString &message)
 {
     const QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss.zzz"));
@@ -182,12 +194,13 @@ void OtaManager::onConnectClicked()
             appendLog(QStringLiteral("WARN"), tr("FHSS 처리가 끝난 뒤 연결을 해제하세요"));
             return;
         }
-        if (m_fhssActive && m_transport) {
+        if (m_fhssActive) {
             // 연결을 끊기 전에 호핑을 꺼서 칩을 정상 상태(채널 0)로 되돌려둠 —
             // 안 그러면 다음 연결 때도 칩이 계속 호핑 중이라 CONFIG/ACTIVATE가
             // 채널 0에 있는 ESP32에 안 닿음(smoke_fhss_activate_main.cpp 상단
             // 주석과 같은 문제). 결과는 굳이 안 따짐 — 연결 자체를 끊는 게 목적.
-            (void)m_transport->stopFhss();
+            if (Cc1101Transport *cc1101 = fhssTransport())
+                (void)cc1101->stopFhss();
             m_fhssActive = false;
             ui->fhssStatusLabel->setText(tr("비활성"));
             ui->fhssActivateButton->setEnabled(true);
@@ -576,6 +589,15 @@ void OtaManager::onFhssActivateClicked()
     }
     const uint32_t targetDeviceId = selected.toUInt();
 
+    // fhssTransport()가 nullptr이면(지금은 사실상 항상 CC1101이라 안 일어나지만,
+    // 나중에 로컬 파일 드라이버가 생기면 그때는 진짜로 nullptr이 됨) FHSS
+    // 자체를 쓸 수 없는 드라이버라는 뜻 — 워커 스레드를 만들기 전에 여기서 막음.
+    Cc1101Transport *fhssTransportPtr = fhssTransport();
+    if (!fhssTransportPtr) {
+        appendLog(QStringLiteral("WARN"), tr("이 드라이버는 FHSS를 지원하지 않습니다 (CC1101만 지원)"));
+        return;
+    }
+
     // 시드가 비어있으면 여기서 바로 무작위로 채움(onHopSeedRandomClicked()와
     // 같은 로직) — 매번 "무작위 생성"을 따로 누르게 하지 않기 위한 편의.
     if (ui->hopSeedEdit->text().isEmpty()) {
@@ -617,7 +639,10 @@ void OtaManager::onFhssActivateClicked()
     // 최악의 경우 timeoutMs*maxRetry*2단계만큼 걸림, 기본값 300ms*5*2=3초)이고,
     // 그 뒤 이어지는 kFhssSyncSettleMs(2000ms) 대기까지 있어서 훨씬 더 김 —
     // onDiscoverClicked()와 똑같은 이유로 QThread::create() 워커에서 돌림.
-    ITransport *transport = m_transport.get();
+    // Cc1101Transport*로 캡처(ITransport*가 아님) — stopFhss() 등 FHSS 전용
+    // 메서드가 ITransport 인터페이스엔 없어서 ITransport*로는 호출이 아예
+    // 컴파일이 안 됨(fhssTransport() 주석 참고).
+    Cc1101Transport *transport = fhssTransportPtr;
     QThread *worker = QThread::create([this, transport, targetDeviceId, sessionId, seed,
                                         channelCount, firstChannel, generation]() {
         const auto logLine = [this](const QString &msg) {
@@ -745,7 +770,8 @@ void OtaManager::onFhssStopClicked()
         appendLog(QStringLiteral("WARN"), tr("전송이 진행 중입니다 — 완료/실패 후에 시도하세요"));
         return;
     }
-    if (!m_transport) {
+    Cc1101Transport *transport = fhssTransport();
+    if (!transport) {
         appendLog(QStringLiteral("WARN"), tr("연결이 없습니다"));
         return;
     }
@@ -753,9 +779,9 @@ void OtaManager::onFhssStopClicked()
     // stopFhss()/setChannel()/startRx()는 전부 즉시 반환하는 ioctl 호출이라
     // (discoverDevices()/rolloutFhssConfig()처럼 몇백ms~몇 초씩 기다리는 게
     // 아님) 워커 스레드 없이 GUI 스레드에서 그냥 동기 호출해도 창이 안 얼어붙음.
-    const Cc1101Status result = m_transport->stopFhss();
-    (void)m_transport->setChannel(0);
-    (void)m_transport->startRx();
+    const Cc1101Status result = transport->stopFhss();
+    (void)transport->setChannel(0);
+    (void)transport->startRx();
 
     m_fhssActive = false;
     ui->fhssActivateButton->setEnabled(true);
@@ -774,14 +800,15 @@ void OtaManager::onFhssStatusTick()
     // 중에는 send()/recv() 타이밍이 더 중요하므로 불필요한 ioctl 트래픽을
     // 안 섞으려는 것(smoke_fhss_ota_transfer_main.cpp도 전송 중엔 상태를
     // 안 찍음).
-    if (!m_fhssActive || m_fhssBusy || !m_transport)
+    Cc1101Transport *transport = fhssTransport();
+    if (!m_fhssActive || m_fhssBusy || !transport)
         return;
     if (m_session && m_session->state() != OtaSessionState::Idle
         && m_session->state() != OtaSessionState::Completed
         && m_session->state() != OtaSessionState::Failed)
         return;
 
-    const auto status = m_transport->getFhssStatus();
+    const auto status = transport->getFhssStatus();
     ui->fhssStatusLabel->setText(
         tr("활성 · %1 · channel=%2 · sync_packets=%3 · sync_misses=%4")
             .arg(status.synchronized ? tr("동기화됨") : tr("동기화 대기"))

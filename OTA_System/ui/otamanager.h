@@ -18,6 +18,12 @@ class QCloseEvent;
 class QTimer;
 QT_END_NAMESPACE
 
+// Cc1101Transport 전체 정의는 필요 없고 포인터 타입만 있으면 되므로 전방
+// 선언만 함 — otamanager.cpp에서 "cc1101transport.h"를 include해야 실제로
+// 이 타입의 멤버(stopFhss() 등)를 씀. fhssTransport() 존재 이유는 아래
+// 주석 참고.
+class Cc1101Transport;
+
 class OtaManager : public QMainWindow
 {
     Q_OBJECT
@@ -68,6 +74,15 @@ private:
     // CC1101 전용 타입을 헤더에 안 끌고 오려고(다른 곳과 같은 이유) 결과를
     // bool/문자열로만 넘김 — 상세는 design-notes 45절 참고
     void handleFhssActivationResult(bool activated, uint32_t sessionId, const QString &message);
+    // m_transport는 std::unique_ptr<ITransport>(기반 클래스) 타입이라서
+    // stopFhss()/configureFhss() 같은 CC1101 전용 메서드(ITransport 계약
+    // 밖, cc1101transport.h의 Cc1101Transport에만 있음)를 m_transport->로
+    // 직접 못 부른다 — 컴파일 에러("no member named 'stopFhss' in
+    // 'ITransport'") 남. dynamic_cast로 실제 타입을 확인해서 돌려줌
+    // (driverCombo가 CC1101일 때만 m_transport가 실제로 Cc1101Transport라서
+    // 보통 항상 성공하지만, 나중에 LocalFileTransport가 생기면 그때는
+    // nullptr이 돌아올 수 있어 호출부마다 null 체크 필요).
+    Cc1101Transport *fhssTransport() const;
 
     // otamanager.ui에서 setupUi()가 채워주는 위젯 트리 (driverCombo, portEdit,
     // connectButton, unicastRadio/broadcastRadio, targetCombo, selectFileButton,
