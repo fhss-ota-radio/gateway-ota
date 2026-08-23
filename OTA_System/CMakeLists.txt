@@ -236,6 +236,18 @@ target_link_libraries(ota_smoke_fhss_activate
         ota_core
 )
 
+# CONFIG/ACTIVATE/커널 호핑 시작까지는 ota_smoke_fhss_activate와 동일하게 하고,
+# 그 위에서 OtaSession으로 실제 파일 전송까지 이어붙이는 CLI — 2026-08-23.
+# ota_smoke_fhss_activate가 SYNC 관찰까지만 하고 끝나는 도구라는 게 확인된 뒤
+# (design-notes-gateway-ota-es.md 42절 5차 시도), 그 다음 단계로 추가함.
+add_executable(ota_smoke_fhss_ota_transfer
+    tests/smoke_fhss_ota_transfer_main.cpp
+)
+target_link_libraries(ota_smoke_fhss_ota_transfer
+    PRIVATE
+        ota_core
+)
+
 # ---------- tools/spidev: 진단 도구 (제품 코드 아님) ----------
 # SpidevTransport는 커널 드라이버(/dev/cc1101)를 우회해서 /dev/spidevX.Y로 CC1101을
 # 직접 폴링하는 ITransport 구현체입니다. "안 되는 원인이 하드웨어냐 커널이냐"를
