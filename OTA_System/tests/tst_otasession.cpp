@@ -23,6 +23,7 @@
 #include <cassert>
 #include <cstdio>
 #include <deque>
+#include <functional>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -79,6 +80,8 @@ public:
     bool send(const std::vector<uint8_t> &data) override
     {
         sentPackets.push_back(data);
+        if (onSend)
+            onSend(data);
         return true;
     }
 
@@ -104,6 +107,7 @@ public:
 
     std::deque<std::vector<uint8_t>> rxQueue;
     std::vector<std::vector<uint8_t>> sentPackets;
+    std::function<void(const std::vector<uint8_t> &)> onSend;
 };
 
 // ---------- 테스트 ----------
@@ -353,11 +357,20 @@ void batchSendingPollsAlreadyArrivedAckDuringSend()
 
     session.start(path, 1, kSessionId, 1000);
 
-    // START ACK와 slot0 DATA ACK를 미리 큐에 순서대로 넣어둠 — slot0을
-    // 보내고 나서 첫 폴링 구간에서 바로 소비될 것으로 기대.
+    // START ACK만 미리 넣고, slot0 ACK은 실제 DATA(seq0) send 직후
+    // 도착하도록 주입한다. START 이전의 미래 DATA ACK을 큐에 넣는 것은
+    // 실 RF 동작과 다르고 pre-DATA stale drain에 의해 버려지는 게 맞다.
     transport.rxQueue.push_back(
         makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_START, OTA_CONTROL_SEQUENCE));
-    transport.rxQueue.push_back(makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_DATA, 0));
+    bool injectedDataAck = false;
+    transport.onSend = [&](const std::vector<uint8_t> &packet) {
+        if (!injectedDataAck && packet.size() >= OTA_DATA_HEADER_SIZE &&
+            packet[0] == OTA_PKT_DATA && ota_read_u32_le(packet.data() + 5) == 0) {
+            transport.rxQueue.push_back(
+                makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_DATA, 0));
+            injectedDataAck = true;
+        }
+    };
 
     session.tick(1010); // Handshaking -> SendingBatch(slot0,1 전송) -> WaitingBatchAck
 
@@ -367,6 +380,35 @@ void batchSendingPollsAlreadyArrivedAckDuringSend()
 
     std::remove(path.c_str());
     std::cout << "[OK] batchSendingPollsAlreadyArrivedAckDuringSend\n";
+}
+
+// 새 드라이버의 커널 RX 큐에는 START 재시도 동안 ESP가 보낸 DATA timeout
+// NACK이 START ACK 뒤에 남을 수 있다. START ACK을 받은 직후 사용자 공간에서
+// 이미 큐에 있던 응답을 bounded drain하여 첫 배치의 응답으로 오인하지 않는다.
+void preDataStaleNackIsDrainedAfterStartAck()
+{
+    const std::string path = writeTempFile("os_predatadrain.bin", repeat('I', 48 + 10));
+    constexpr uint32_t kSessionId = 0x89898989u;
+
+    FakeTransport transport;
+    OtaSession session(transport, /*batchSize=*/2, /*timeoutMs=*/300, /*maxRetry=*/5,
+                       /*chunkDelayMs=*/0);
+
+    session.start(path, 1, kSessionId, 1000);
+    transport.rxQueue.push_back(
+        makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_START, OTA_CONTROL_SEQUENCE));
+    transport.rxQueue.push_back(
+        makeAckOrNack(OTA_PKT_NACK, kSessionId, OTA_PKT_DATA, 0, OTA_RESULT_TIMEOUT));
+
+    session.tick(1010);
+
+    assert(session.state() == OtaSessionState::WaitingBatchAck);
+    assert(transport.countSentOfType(OTA_PKT_DATA) == 2);
+    assert(session.progress().ackedChunks == 0);
+    assert(transport.rxQueue.empty());
+
+    std::remove(path.c_str());
+    std::cout << "[OK] preDataStaleNackIsDrainedAfterStartAck\n";
 }
 
 // [버그 수정 2026-08-20, ESP32 담당자 실기기 테스트로 발견] retransmitSlot()이
@@ -610,6 +652,7 @@ int main()
     endNackGoesDirectlyToFailedWithoutRetry();
     resumeDoesNotCauseSpuriousTimeout();
     batchSendingPollsAlreadyArrivedAckDuringSend();
+    preDataStaleNackIsDrainedAfterStartAck();
     retransmitSlotPollsForResponseDuringItsOwnDelay();
     batchSlotsGetIndividualSentAtMsNotSharedBatchStart();
     handshakeIgnoresAckWithWrongAcknowledgedType();

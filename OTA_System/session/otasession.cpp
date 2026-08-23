@@ -158,7 +158,37 @@ void OtaSession::sendStartPacket()
         fail("OTA_START 인코딩 실패");
         return;
     }
-    m_transport.send(std::vector<uint8_t>(packet, packet + written));
+    // [2026-08-23 정정] 실기기로 확인해보니 단순 로그만으로는 부족했다 —
+    // FHSS 호핑 중 -EBUSY 충돌이 실제로 재현됐고(design-notes 42절 6차
+    // 시도), 배치 DATA 전송(enterSendingBatch())처럼 한 번 실패로 바로
+    // 세션을 죽이면 호핑 환경에서는 거의 항상 실패한다. sendWithRetry()로
+    // 짧게 재시도하도록 바꿈.
+    (void)sendWithRetry(std::vector<uint8_t>(packet, packet + written), "OTA_START");
+}
+
+bool OtaSession::sendWithRetry(const std::vector<uint8_t> &packet, const std::string &context)
+{
+    // [2026-08-23 추가] otasession.h의 선언부 주석 참고 — FHSS 호핑 중
+    // hop_worker의 자체 SYNC 송신과 겹치면 -EBUSY로 실패할 수 있는데,
+    // 실제로는 몇 ms짜리 찰나(SYNC 패킷 13바이트 전송 시간 수준)라
+    // 짧게 쉬었다 재시도하면 대부분 풀린다. kMaxAttempts/kRetryDelayMs는
+    // 아직 실기기로 정밀 튜닝한 값이 아니라 "합리적인 기본값" — 다음
+    // 실기기 테스트에서 재시도 로그 빈도를 보고 조정할 것.
+    constexpr int kMaxAttempts = 4;
+    constexpr int kRetryDelayMs = 8;
+    for (int attempt = 1; attempt <= kMaxAttempts; ++attempt) {
+        if (m_transport.send(packet))
+            return true;
+        if (attempt < kMaxAttempts) {
+            log(context + " transport.send() 실패(아마 -EBUSY, FHSS 호핑과 충돌) — "
+                + std::to_string(kRetryDelayMs) + "ms 후 재시도 (" + std::to_string(attempt)
+                + "/" + std::to_string(kMaxAttempts) + ")");
+            std::this_thread::sleep_for(std::chrono::milliseconds(kRetryDelayMs));
+        }
+    }
+    log(context + " transport.send() 실패 — " + std::to_string(kMaxAttempts)
+        + "회 재시도 후에도 실패");
+    return false;
 }
 
 void OtaSession::enterHandshaking(int64_t nowMs)
@@ -189,6 +219,18 @@ void OtaSession::tickHandshaking(int64_t nowMs)
 
     if (packet.kind == ReceivedPacketKind::Ack && matchesOurStart) {
         log("START ACK 수신 (session_id=0x" + toHex(m_sessionId) + ") -> 배치 전송 시작");
+        // 하드웨어 FLUSH_RX ioctl은 새 드라이버에서 이후 poll/read 통지를
+        // 끊어 ACK가 RF로 도착해도 userspace가 못 읽게 했다. 수신 상태는
+        // 건드리지 않고, START ACK 전에 누적된 응답만 bounded drain한다.
+        constexpr int kMaxPreDataDrain = 64;
+        int drained = 0;
+        for (; drained < kMaxPreDataDrain; ++drained) {
+            const auto stale = m_transport.recv();
+            if (stale.empty())
+                break;
+        }
+        log("START ACK 이후 pre-DATA stale RX userspace drain="
+            + std::to_string(drained));
         enterSendingBatch(nowMs);
         return;
     }
@@ -267,7 +309,13 @@ void OtaSession::enterSendingBatch(int64_t nowMs)
     // 위함.
     int64_t currentMs = nowMs;
     for (auto &slot : m_batch) {
-        if (!m_transport.send(slot.packet)) {
+        // [2026-08-23 정정, 실기기 FHSS 통합 테스트에서 재현] 예전엔 여기서
+        // 한 번만 send()를 부르고 실패하면 바로 fail()로 세션 전체를
+        // 죽였다 — FHSS 호핑 중엔 hop_worker의 SYNC 송신과 겹치는 -EBUSY가
+        // 흔해서(design-notes 42절 6차 시도, 실제로 seq=4에서 재현됨),
+        // 이 경로가 사실상 항상 세션을 죽이는 셈이었다. sendWithRetry()로
+        // 짧게 재시도한 뒤에도 실패해야만 진짜 fail()로 처리한다.
+        if (!sendWithRetry(slot.packet, "seq=" + std::to_string(slot.sequence) + " 배치 전송")) {
             fail("OTA_DATA 전송 실패 (sequence=" + std::to_string(slot.sequence) + ")");
             return;
         }
@@ -320,7 +368,7 @@ bool OtaSession::retransmitSlot(BatchSlot &slot, int64_t nowMs, const char *reas
     // RETRANSMITTING은 이 슬롯 하나 재전송하는 동안만 순간적으로 거쳐감
     // (fsm-design.md 상태 다이어그램: RETRANSMITTING -> WAITING_BATCH_ACK).
     setState(OtaSessionState::Retransmitting);
-    m_transport.send(slot.packet);
+    (void)sendWithRetry(slot.packet, "seq=" + std::to_string(slot.sequence) + " 재전송");
     slot.sentAtMs = nowMs;
 
     // [추가 2026-08-19] 재전송에도 배치 전송과 같은 간격을 둔다.
@@ -517,7 +565,8 @@ void OtaSession::sendEndPacket()
         fail("OTA_END 인코딩 실패");
         return;
     }
-    m_transport.send(std::vector<uint8_t>(packet, packet + written));
+    // [2026-08-23 정정] sendStartPacket()과 같은 이유로 sendWithRetry() 사용.
+    (void)sendWithRetry(std::vector<uint8_t>(packet, packet + written), "OTA_END");
 }
 
 void OtaSession::enterWaitingEndAck(int64_t nowMs)

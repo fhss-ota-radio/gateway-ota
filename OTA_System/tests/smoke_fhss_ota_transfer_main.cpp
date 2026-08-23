@@ -79,6 +79,86 @@ void printUsage(const char *argv0)
 // 기준 약 0.9~1.2초). 그 전에 OTA_START를 보내면 ESP32가 아직 OTA_FHSS_READY가
 // 아니라서 응답이 없을 수 있으므로, 여유를 둬서 기다린다.
 constexpr int kSyncSettleMs = 2000;
+constexpr int kSlotPollMs = 2;
+constexpr int kPostSyncGuardMs = 25;
+constexpr int kSlotGateTimeoutMs = 1200;
+
+class SlotAwareTransport final : public ITransport
+{
+public:
+    SlotAwareTransport(Cc1101Transport &transport, uint32_t generation)
+        : m_transport(transport), m_generation(generation)
+    {
+    }
+
+    bool open() override { return m_transport.isOpen() || m_transport.open(); }
+    void close() override { m_transport.close(); }
+    bool isOpen() const override { return m_transport.isOpen(); }
+
+    bool send(const std::vector<uint8_t> &packet) override
+    {
+        const auto deadline = std::chrono::steady_clock::now()
+            + std::chrono::milliseconds(kSlotGateTimeoutMs);
+        auto status = m_transport.getFhssStatus();
+        if (!usable(status)) {
+            logGateFailure("initial status", status);
+            return false;
+        }
+
+        const uint64_t baselineSlot = status.currentSlot;
+        while (std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(kSlotPollMs));
+            status = m_transport.getFhssStatus();
+            if (!usable(status)) {
+                logGateFailure("status while waiting", status);
+                return false;
+            }
+            if (status.currentSlot == baselineSlot)
+                continue;
+
+            const uint64_t sendSlot = status.currentSlot;
+            std::this_thread::sleep_for(std::chrono::milliseconds(kPostSyncGuardMs));
+            const auto verified = m_transport.getFhssStatus();
+            if (!usable(verified) || verified.currentSlot != sendSlot)
+                continue;
+
+            const uint8_t type = packet.empty() ? 0 : packet.front();
+            std::cout << "[fhss_ota][slot_tx] type=" << static_cast<unsigned>(type)
+                      << " slot=" << sendSlot
+                      << " channel=" << static_cast<unsigned>(verified.currentChannel)
+                      << " post_sync_ms=" << kPostSyncGuardMs << "\n";
+            return m_transport.send(packet);
+        }
+
+        std::cerr << "[fhss_ota][slot_tx] safe slot timeout after "
+                  << kSlotGateTimeoutMs << "ms\n";
+        return false;
+    }
+
+    std::vector<uint8_t> recv() override { return m_transport.recv(); }
+
+private:
+    bool usable(const Cc1101FhssStatus &status) const
+    {
+        return status.enabled && status.synchronized &&
+               status.role == static_cast<uint8_t>(Cc1101FhssRole::Master) &&
+               status.generation == m_generation && status.lastError == 0;
+    }
+
+    static void logGateFailure(const char *where, const Cc1101FhssStatus &status)
+    {
+        std::cerr << "[fhss_ota][slot_tx] " << where
+                  << " enabled=" << status.enabled
+                  << " synchronized=" << status.synchronized
+                  << " role=" << static_cast<unsigned>(status.role)
+                  << " generation=" << status.generation
+                  << " slot=" << status.currentSlot
+                  << " error=" << status.lastError << "\n";
+    }
+
+    Cc1101Transport &m_transport;
+    uint32_t m_generation;
+};
 
 } // namespace
 
@@ -216,7 +296,13 @@ int main(int argc, char *argv[])
     // smoke_session_send_main.cpp와 동일한 사용법 — transport.send()/recv()는
     // 지금이 어느 채널이든 그대로 동작한다(커널이 채널 전환을 알아서 함).
     std::cout << "[fhss_ota] 4단계: OtaSession으로 파일 전송 시작...\n";
-    OtaSession session(transport, batchSize, timeoutMs, maxRetry, chunkDelayMs);
+    SlotAwareTransport slotAwareTransport(transport, generation);
+    if (chunkDelayMs != 0) {
+        std::cout << "[fhss_ota] slot-aware TX가 패킷 간격을 소유하므로 chunkDelayMs="
+                  << chunkDelayMs << "는 사용하지 않습니다.\n";
+    }
+    OtaSession session(slotAwareTransport, batchSize, timeoutMs, maxRetry,
+                       /*chunkDelayMs=*/0);
     session.setOnStateChanged([](OtaSessionState s) {
         std::cout << "[fhss_ota] 상태 -> " << otaSessionStateName(s) << "\n";
     });
