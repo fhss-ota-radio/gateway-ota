@@ -158,18 +158,37 @@ void OtaSession::sendStartPacket()
         fail("OTA_START 인코딩 실패");
         return;
     }
-    // [2026-08-23 추가, 실기기 FHSS 통합 테스트 디버깅용] 이전엔 이 결과를
-    // 그냥 버렸다 — FHSS 호핑 중에는 커널의 hop_worker가 매 슬롯 SYNC를
-    // 스스로 송신하는데, 그 순간과 겹치면 cc1101_write()가 -EBUSY를 그대로
-    // 돌려준다(kernel-cc1101-spi cc1101_main.c 315~318행: TX 중이면 write()가
-    // 즉시 -EBUSY). 이 실패를 조용히 삼키면 "패킷을 보냈다고 착각한 채
-    // 응답만 기다리다 타임아웃"이 되는데, slot_duration_us(300ms)와 이
-    // 세션의 기본 재시도 주기(timeoutMs=300ms)가 우연히 같아서 매 재시도가
-    // 똑같은 위상에서 계속 충돌할 수 있다(ESP32 담당자 진단, design-notes
-    // 42절 6차 시도 참고). 그래서 실패하면 반드시 로그로 남긴다.
-    if (!m_transport.send(std::vector<uint8_t>(packet, packet + written)))
-        log("OTA_START transport.send() 실패 — FHSS 호핑 중이면 hop_worker의 "
-            "SYNC 송신과 -EBUSY로 충돌했을 가능성 있음");
+    // [2026-08-23 정정] 실기기로 확인해보니 단순 로그만으로는 부족했다 —
+    // FHSS 호핑 중 -EBUSY 충돌이 실제로 재현됐고(design-notes 42절 6차
+    // 시도), 배치 DATA 전송(enterSendingBatch())처럼 한 번 실패로 바로
+    // 세션을 죽이면 호핑 환경에서는 거의 항상 실패한다. sendWithRetry()로
+    // 짧게 재시도하도록 바꿈.
+    (void)sendWithRetry(std::vector<uint8_t>(packet, packet + written), "OTA_START");
+}
+
+bool OtaSession::sendWithRetry(const std::vector<uint8_t> &packet, const std::string &context)
+{
+    // [2026-08-23 추가] otasession.h의 선언부 주석 참고 — FHSS 호핑 중
+    // hop_worker의 자체 SYNC 송신과 겹치면 -EBUSY로 실패할 수 있는데,
+    // 실제로는 몇 ms짜리 찰나(SYNC 패킷 13바이트 전송 시간 수준)라
+    // 짧게 쉬었다 재시도하면 대부분 풀린다. kMaxAttempts/kRetryDelayMs는
+    // 아직 실기기로 정밀 튜닝한 값이 아니라 "합리적인 기본값" — 다음
+    // 실기기 테스트에서 재시도 로그 빈도를 보고 조정할 것.
+    constexpr int kMaxAttempts = 4;
+    constexpr int kRetryDelayMs = 8;
+    for (int attempt = 1; attempt <= kMaxAttempts; ++attempt) {
+        if (m_transport.send(packet))
+            return true;
+        if (attempt < kMaxAttempts) {
+            log(context + " transport.send() 실패(아마 -EBUSY, FHSS 호핑과 충돌) — "
+                + std::to_string(kRetryDelayMs) + "ms 후 재시도 (" + std::to_string(attempt)
+                + "/" + std::to_string(kMaxAttempts) + ")");
+            std::this_thread::sleep_for(std::chrono::milliseconds(kRetryDelayMs));
+        }
+    }
+    log(context + " transport.send() 실패 — " + std::to_string(kMaxAttempts)
+        + "회 재시도 후에도 실패");
+    return false;
 }
 
 void OtaSession::enterHandshaking(int64_t nowMs)
@@ -278,7 +297,13 @@ void OtaSession::enterSendingBatch(int64_t nowMs)
     // 위함.
     int64_t currentMs = nowMs;
     for (auto &slot : m_batch) {
-        if (!m_transport.send(slot.packet)) {
+        // [2026-08-23 정정, 실기기 FHSS 통합 테스트에서 재현] 예전엔 여기서
+        // 한 번만 send()를 부르고 실패하면 바로 fail()로 세션 전체를
+        // 죽였다 — FHSS 호핑 중엔 hop_worker의 SYNC 송신과 겹치는 -EBUSY가
+        // 흔해서(design-notes 42절 6차 시도, 실제로 seq=4에서 재현됨),
+        // 이 경로가 사실상 항상 세션을 죽이는 셈이었다. sendWithRetry()로
+        // 짧게 재시도한 뒤에도 실패해야만 진짜 fail()로 처리한다.
+        if (!sendWithRetry(slot.packet, "seq=" + std::to_string(slot.sequence) + " 배치 전송")) {
             fail("OTA_DATA 전송 실패 (sequence=" + std::to_string(slot.sequence) + ")");
             return;
         }
@@ -331,9 +356,7 @@ bool OtaSession::retransmitSlot(BatchSlot &slot, int64_t nowMs, const char *reas
     // RETRANSMITTING은 이 슬롯 하나 재전송하는 동안만 순간적으로 거쳐감
     // (fsm-design.md 상태 다이어그램: RETRANSMITTING -> WAITING_BATCH_ACK).
     setState(OtaSessionState::Retransmitting);
-    if (!m_transport.send(slot.packet))
-        log("seq=" + std::to_string(slot.sequence) +
-            " 재전송 transport.send() 실패 — FHSS 호핑 중이면 -EBUSY 충돌 의심");
+    (void)sendWithRetry(slot.packet, "seq=" + std::to_string(slot.sequence) + " 재전송");
     slot.sentAtMs = nowMs;
 
     // [추가 2026-08-19] 재전송에도 배치 전송과 같은 간격을 둔다.
@@ -530,10 +553,8 @@ void OtaSession::sendEndPacket()
         fail("OTA_END 인코딩 실패");
         return;
     }
-    // [2026-08-23 추가] sendStartPacket()과 같은 이유 — send() 실패를
-    // 조용히 삼키지 않는다.
-    if (!m_transport.send(std::vector<uint8_t>(packet, packet + written)))
-        log("OTA_END transport.send() 실패 — FHSS 호핑 중이면 -EBUSY 충돌 의심");
+    // [2026-08-23 정정] sendStartPacket()과 같은 이유로 sendWithRetry() 사용.
+    (void)sendWithRetry(std::vector<uint8_t>(packet, packet + written), "OTA_END");
 }
 
 void OtaSession::enterWaitingEndAck(int64_t nowMs)
