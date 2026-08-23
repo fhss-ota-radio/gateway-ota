@@ -24,7 +24,7 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
 | 1 | Qt 프로젝트 세팅 및 화면 뼈대 | ✅ 완료 |
 | 2 | 전송 계층 추상화 + `Cc1101Transport` | ✅ 완료 (실기기 1067/1067) |
 | 3 | BIN 분할 + CRC | ✅ 완료 |
-| 4 | 핸드셰이크 + 송수신 + ACK | 🟡 `OtaSession`(배치 ACK+선택적 재전송) 구현·**실기기 검증 완료**(SHA256 무결성·NACK 실발신·전송효율 개선까지 포함, 2026-08-19) + `DISCOVER`/`DISCOVER_ACK` 기기 탐색 구현(2026-08-20) + **Qt 화면 연결 완료**(2026-08-20, `feature/qt-ui-integration`에서 진행돼 2026-08-23 병합) + **DISCOVER 화면 연동 완료**(2026-08-23, 유니캐스트도 이제 실동작) |
+| 4 | 핸드셰이크 + 송수신 + ACK | 🟡 `OtaSession`(배치 ACK+선택적 재전송) 구현·**실기기 검증 완료**(SHA256 무결성·NACK 실발신·전송효율 개선까지 포함, 2026-08-19) + `DISCOVER`/`DISCOVER_ACK` 기기 탐색 구현(2026-08-20) + **Qt 화면 연결 완료**(2026-08-20, `feature/qt-ui-integration`에서 진행돼 2026-08-23 병합) + **DISCOVER 화면 연동 완료**(2026-08-23, 유니캐스트도 이제 실동작) + **FHSS 화면 연동 완료**(2026-08-23, `feature/gateway-fhss-sync`에서 진행돼 병합 — Qt GUI 통합 4단계 전부 코드 작성 끝, 실기기 빌드 검증 남음) |
 | 5 | 실기기 통합 검증 | ✅ 완료 — 전송 + 재조립 무결성 검증 통과 |
 
 > **✅ (2026-08-22) Pi→ESP32 실통합 OTA 전송 검증 완료**: `test/esp32-integration`
@@ -174,8 +174,26 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
       유니캐스트 전송도 실제로 동작함(브로드캐스트 제한 해제)**. 워커
       스레드와 GUI 스레드가 같은 `m_transport`를 동시에 건드리지 않도록
       조회 중엔 연결 해제·전송 시작을 막음. Qt6 없는 샌드박스라 실제 빌드
-      검증 필요. 상세: `docs/note/design-notes-gateway-ota-es.md` 44절 — 다음
-      할 일: FHSS rollout/hopping 연동
+      검증 필요. 상세: `docs/note/design-notes-gateway-ota-es.md` 44절
+- [x] **(2026-08-23) FHSS 섹션 UI + rollout/hopping 연동** — `feature/gateway-fhss-sync`의
+      `session/fhssrollout.h`(`rolloutFhssConfig()`)와
+      `Cc1101Transport::configureFhss()/startFhss()/stopFhss()/getFhssStatus()`가
+      이 브랜치엔 없었음(PR#5 머지 시점 이후 브랜치에 쌓인 커밋 10개가
+      재병합 안 됨) — 먼저 병합한 뒤 착수. 새 "FHSS 호핑(실험적)" 카드에
+      채널 수/시작 채널/generation 입력 + 기존 호핑 seed 입력을 모아두고,
+      "FHSS 활성화" 버튼이 `targetCombo`에서 고른 기기 하나에
+      CONFIG→ACTIVATE→Gateway 커널 MASTER 호핑 시작까지 순서대로 실행함
+      (여러 기기 동시 호핑은 `rolloutFhssConfig()` 설계상 아직 미지원).
+      FHSS 핸드셰이크에 쓴 `session_id`를 이후 `OtaSession::start()`에도
+      재사용해서 "호핑 위에서 파일 전송"이 자연스럽게 이어짐
+      (`smoke_fhss_ota_transfer_main.cpp`와 같은 관례). RF 프로필(주파수/
+      싱크워드 등 무선 레벨 상수)은 팀 공용 값이라 화면 입력이 아니라
+      코드에 고정값으로 박아둠. `rolloutFhssConfig()`가 최악의 경우
+      수 초 걸리는 blocking 호출이라 DISCOVER와 같은 방식(`QThread` 워커 +
+      `QMetaObject::invokeMethod`)으로 처리. **이걸로 Qt GUI 통합
+      4단계(Connect/DISCOVER/Start-Pause/FHSS) 전부 코드 작성 완료** —
+      Qt6 없는 샌드박스라 실제 빌드/실기기 검증 필요. 상세:
+      `docs/note/design-notes-gateway-ota-es.md` 45절
 - [ ] **Pi → ESP32 실통합 OTA 전송 테스트 — 진행 중 (`test/esp32-integration`
       브랜치)**. 지금까지는 라즈베리파이끼리만 검증됐고, 실제 소비자(ESP32)가
       파일을 받아 적용하는 것은 아직 확인 전. 경위는

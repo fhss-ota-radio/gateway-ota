@@ -38,6 +38,9 @@ private slots:
     void onPauseClicked();
     void onHopSeedRandomClicked();
     void onDiscoverClicked();
+    void onFhssActivateClicked();
+    void onFhssStopClicked();
+    void onFhssStatusTick(); // m_fhssStatusTimer가 주기 호출 — getFhssStatus() 표시 갱신
     void onSessionTick(); // m_tickTimer가 주기 호출 — OtaSession::tick()으로 그대로 넘김
 
 private:
@@ -59,6 +62,12 @@ private:
     // 에서만 건드려야 하므로 — discoverDevices() 자체가 blocking이라
     // (discovery.h 주석) 워커 스레드로 뺀 이유는 design-notes 44절 참고)
     void handleDiscoveredDevices(const std::vector<DiscoveredDevice> &devices);
+    // onFhssActivateClicked()가 백그라운드 QThread에서 rolloutFhssConfig()+
+    // configureFhss()+startFhss()를 다 돌린 뒤, invokeMethod(Qt::QueuedConnection)로
+    // GUI 스레드에서 이 함수를 불러 버튼/상태 라벨을 갱신함. Cc1101Status 등
+    // CC1101 전용 타입을 헤더에 안 끌고 오려고(다른 곳과 같은 이유) 결과를
+    // bool/문자열로만 넘김 — 상세는 design-notes 45절 참고
+    void handleFhssActivationResult(bool activated, uint32_t sessionId, const QString &message);
 
     // otamanager.ui에서 setupUi()가 채워주는 위젯 트리 (driverCombo, portEdit,
     // connectButton, unicastRadio/broadcastRadio, targetCombo, selectFileButton,
@@ -77,5 +86,14 @@ private:
     QTimer *m_tickTimer = nullptr; // OtaSession::tick()을 10ms마다 호출 (otasession.h 84행 주석 그대로)
     int m_retransmitEventCount = 0; // ackStatusLabel의 "재전송 N회" 표시용 — Retransmitting 상태 진입 횟수 근사치
     bool m_discovering = false; // DISCOVER 워커 스레드가 도는 동안 true — 중복 클릭/m_transport 동시접근 방지
+
+    // FHSS(주파수 도약) 상태 — targetCombo에서 고른 기기 하나와만 맺음(여러
+    // 기기 동시 호핑은 fhssrollout.h 설계상 아직 미지원, otamanager.ui
+    // fhssHintLabel 참고).
+    bool m_fhssBusy = false;   // 활성화/중지 워커 스레드가 도는 동안 true — m_discovering과 같은 이유
+    bool m_fhssActive = false; // 활성화 성공 + Gateway 커널 MASTER 호핑이 켜진 상태
+    uint32_t m_fhssSessionId = 0;      // FHSS_CONFIG/ACTIVATE에 쓴 session_id — 이후 OtaSession::start()에 그대로 재사용
+    uint32_t m_fhssTargetDeviceId = 0; // 활성화 당시 targetCombo에서 골랐던 대상(활성화 후 콤보가 바뀌어도 유지)
+    QTimer *m_fhssStatusTimer = nullptr; // 활성화 중일 때만 getFhssStatus()를 주기 호출(500ms)해 fhssStatusLabel 갱신
 };
 #endif // OTAMANAGER_H
