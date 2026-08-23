@@ -39,4 +39,64 @@ struct Cc1101RxMetadata
     uint8_t channel = 0;
 };
 
+// [2026-08-22 추가] FHSS(주파수 도약) 역할값 — kernel-cc1101-spi/cc1101_ioctl.h의
+// CC1101_FHSS_ROLE_MASTER/SLAVE와 "의미"만 맞춘 값(Cc1101Status와 같은 원칙 —
+// 이 파일은 Qt/리눅스 헤더 의존 없이 어디서나 컴파일돼야 해서, 커널 UAPI 상수를
+// 직접 include하지 않고 우리가 같은 값으로 다시 선언한다).
+enum class Cc1101FhssRole : uint8_t {
+    Master = 1,
+    Slave = 2,
+};
+
+// configureFhss()에 넘길 설정값. 두 부분으로 나뉘는 이유는 커널
+// cc1101_fhss_config 구조체와 같다:
+//   - rf* 필드: 무선 레벨 상수(기준 주파수/채널 간격/싱크워드/레지스터값).
+//     ota_protocol의 FHSS_CONFIG 패킷엔 안 실림 — 팀이 정한 로컬 상수를
+//     Gateway가 알아서 채워 넣는다 (예: docs의 channel-profile 표 참고).
+//   - 나머지(hop policy) 필드: ESP32에도 그대로 방송(ota_fhss_config_fields_t)하는
+//     값과 동일해야 한다 — Gateway와 ESP32가 "같은 호핑 순서"를 계산하려면
+//     seed/channelCount/firstChannel 등이 한 글자도 안 틀리고 같아야 하기 때문.
+struct Cc1101FhssConfig
+{
+    uint32_t generation = 0;
+    uint32_t algorithmId = 1; // CC1101_FHSS_ALGORITHM_SEEDED_PERMUTATION
+
+    // -- rf profile (로컬 상수, 와이어로 안 나감) --
+    uint32_t rfBaseFreqHz = 0;
+    uint32_t rfChannelSpacingHz = 0;
+    uint16_t rfSyncWord = 0;
+    uint8_t  rfMdmcfg4 = 0;
+    uint8_t  rfMdmcfg3 = 0;
+    uint8_t  rfPktctrl1 = 0;
+    uint8_t  rfPktctrl0 = 0;
+
+    // -- hop policy (ESP32에도 그대로 방송되는 값과 동일해야 함) --
+    uint32_t seed = 0;
+    uint32_t slotDurationUs = 0;
+    uint32_t channelSwitchGuardUs = 0;
+    uint16_t channelCount = 0;
+    uint8_t  firstChannel = 1;      // 랑데부 채널과 같음 (오늘 계획 기준)
+    uint8_t  rendezvousChannel = 1;
+    uint8_t  reservedChannel = 0;   // OTA 전용(채널 0)은 호핑에서 제외
+    uint8_t  algorithmVersion = 1;  // CC1101_FHSS_ALGORITHM_VERSION
+    uint8_t  channelProfileId = 0;
+};
+
+// getFhssStatus()가 돌려주는, 커널 cc1101_fhss_status를 그대로 옮긴 값 —
+// "지금 호핑 중인지"를 우리가 따로 기억하지 않고 항상 이 함수로 커널에
+// 직접 물어보기 위한 것 (design-notes 참고: 상태를 이중으로 들고 있으면
+// 어긋날 위험이 있어서 커널을 단일 진실 공급원으로 둔다).
+struct Cc1101FhssStatus
+{
+    bool     enabled = false;
+    bool     synchronized = false;
+    uint8_t  currentChannel = 0;
+    uint8_t  role = 0;          // Cc1101FhssRole 값 또는 0(미설정)
+    uint32_t generation = 0;
+    uint64_t currentSlot = 0;
+    int32_t  lastError = 0;
+    uint32_t syncMisses = 0;
+    uint32_t syncPackets = 0;
+};
+
 #endif // CC1101_STATUS_H

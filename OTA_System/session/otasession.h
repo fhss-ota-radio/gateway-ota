@@ -159,6 +159,16 @@ private:
     // m_onLog가 설정돼 있으면 그대로 전달, 아니면 조용히 무시.
     void log(const std::string &msg) const;
 
+    // [2026-08-23 추가, 실기기 FHSS 통합 테스트에서 확인] FHSS 호핑 중에는
+    // 커널 hop_worker가 매 슬롯 스스로 SYNC를 보내는데, 그 순간과 겹치면
+    // transport.send()가 일시적으로 실패한다(-EBUSY, kernel-cc1101-spi
+    // cc1101_write() 315~318행). 진짜 오류가 아니라 "그 찰나만 바쁘다"는
+    // 것뿐이라 짧게 쉬었다 재시도하면 대부분 통과한다 — sendStartPacket()/
+    // sendEndPacket()/retransmitSlot()/배치 전송이 전부 이걸 거쳐가도록
+    // 통일한다(design-notes-gateway-ota-es.md 42절 6차 시도 참고).
+    // context: 로그에 남길 설명 문자열("OTA_START" 등).
+    bool sendWithRetry(const std::vector<uint8_t> &packet, const std::string &context);
+
     void enterHandshaking(int64_t nowMs);
     void tickHandshaking(int64_t nowMs);
     void sendStartPacket();
