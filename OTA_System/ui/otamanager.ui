@@ -160,56 +160,78 @@
       </item>
       <item>
        <widget class="QGroupBox" name="fhssGroup">
-        <!-- 2026-08-23 추가 (Task #4). FHSS(Frequency-Hopping Spread
-             Spectrum, 주파수 도약 확산 스펙트럼) 호핑을 targetCombo에서
-             고른 기기 하나와 맺는 섹션 — rolloutFhssConfig()(CONFIG/ACTIVATE
-             핸드셰이크) + Cc1101Transport::configureFhss()/startFhss()(Gateway
-             자신의 커널 호핑 시작)를 그대로 감쌈. 여러 기기 동시 호핑은 아직
-             지원 안 함(session/fhssrollout.h 설계상 기기 하나씩만 처리 —
-             ACK에 발신 기기 구분 필드가 없어서, 대상 여러 개를 한 번에 보내면
-             어느 응답이 누구 것인지 알 수 없기 때문). 자세한 설계 이유는
-             docs/note/design-notes-gateway-ota-es.md 45절 참고. -->
-        <property name="title"><string>FHSS 호핑 (실험적)</string></property>
+        <!-- 2026-08-23 추가 (Task #4), 2026-08-24 개편: 수동 시드 입력 +
+             별도 "FHSS 활성화" 버튼 방식(FHSS 호핑(실험적))을 없애고, secret_seed
+             txt 파일 드롭다운 선택 + "전송 시작" 클릭 시 자동 시드 파생/활성화로
+             바꿈 — otamanager.cpp의 onStartClicked()가
+             core/hopseed.h(deriveSessionHopSeed())로 public_seed를 매번 새로
+             만들어 hop_seed를 파생하고, 그 값을 그대로 기존
+             rolloutFhssConfig()(CONFIG/ACTIVATE 핸드셰이크) +
+             Cc1101Transport::configureFhss()/startFhss()(Gateway 자신의 커널
+             호핑 시작)에 넘긴다. "FHSS 중지"만 수동 중단용으로 남겨둠. 여러
+             기기 동시 호핑은 아직 지원 안 함(session/fhssrollout.h 설계상
+             기기 하나씩만 처리 — ACK에 발신 기기 구분 필드가 없어서, 대상
+             여러 개를 한 번에 보내면 어느 응답이 누구 것인지 알 수 없기
+             때문). 자세한 설계 이유는 docs/note/design-notes-gateway-ota-es.md
+             45절 참고. -->
+        <property name="title"><string>FHSS 호핑</string></property>
         <layout class="QVBoxLayout" name="fhssOuterLayout">
          <item>
           <layout class="QFormLayout" name="fhssFormLayout">
            <item row="0" column="0">
-            <widget class="QLabel" name="hopSeedLabel">
-             <property name="text"><string>호핑 난수 (FHSS seed)</string></property>
+            <widget class="QLabel" name="secretSeedFolderLabel">
+             <property name="text"><string>시드 폴더</string></property>
             </widget>
            </item>
            <item row="0" column="1">
-            <layout class="QHBoxLayout" name="hopSeedLayout">
+            <layout class="QHBoxLayout" name="secretSeedFolderLayout">
              <item>
-              <widget class="QLineEdit" name="hopSeedEdit">
-               <property name="placeholderText"><string>숫자 입력 또는 무작위 생성 (0~4294967295)</string></property>
+              <widget class="QLineEdit" name="secretSeedFolderEdit">
+               <property name="readOnly"><bool>true</bool></property>
               </widget>
              </item>
              <item>
-              <widget class="QPushButton" name="hopSeedRandomButton">
-               <property name="text"><string>무작위 생성</string></property>
+              <widget class="QPushButton" name="secretSeedFolderBrowseButton">
+               <property name="text"><string>폴더 선택</string></property>
               </widget>
              </item>
             </layout>
            </item>
            <item row="1" column="0">
+            <widget class="QLabel" name="secretSeedVersionLabel">
+             <property name="text"><string>펌웨어 버전 (secret_seed)</string></property>
+            </widget>
+           </item>
+           <item row="1" column="1">
+            <layout class="QHBoxLayout" name="secretSeedVersionLayout">
+             <item>
+              <widget class="QComboBox" name="secretSeedVersionCombo"/>
+             </item>
+             <item>
+              <widget class="QPushButton" name="secretSeedRefreshButton">
+               <property name="text"><string>새로고침</string></property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item row="2" column="0">
             <widget class="QLabel" name="fhssChannelCountLabel">
              <property name="text"><string>채널 수</string></property>
             </widget>
            </item>
-           <item row="1" column="1">
+           <item row="2" column="1">
             <widget class="QSpinBox" name="fhssChannelCountSpin">
              <property name="minimum"><number>1</number></property>
              <property name="maximum"><number>32</number></property>
              <property name="value"><number>8</number></property>
             </widget>
            </item>
-           <item row="2" column="0">
+           <item row="3" column="0">
             <widget class="QLabel" name="fhssFirstChannelLabel">
              <property name="text"><string>시작 채널 (랑데부 채널과 동일)</string></property>
             </widget>
            </item>
-           <item row="2" column="1">
+           <item row="3" column="1">
             <widget class="QSpinBox" name="fhssFirstChannelSpin">
              <!-- 채널 0은 OTA 전용(reservedChannel)이라 호핑 범위에서 제외 —
                   fhssrollout.h의 FhssHopPolicy::reservedChannel 주석 참고 -->
@@ -218,12 +240,12 @@
              <property name="value"><number>1</number></property>
             </widget>
            </item>
-           <item row="3" column="0">
+           <item row="4" column="0">
             <widget class="QLabel" name="fhssGenerationLabel">
              <property name="text"><string>Generation</string></property>
             </widget>
            </item>
-           <item row="3" column="1">
+           <item row="4" column="1">
             <widget class="QSpinBox" name="fhssGenerationSpin">
              <!-- 오래된/재전송된 설정을 걸러내기 위한 버전 번호 — 활성화
                   성공할 때마다 otamanager.cpp가 자동으로 1씩 올려줌 -->
@@ -236,18 +258,13 @@
          </item>
          <item>
           <widget class="QLabel" name="fhssHintLabel">
-           <property name="text"><string>※ 유니캐스트 모드에서 "기기 조회"로 대상을 먼저 고르세요. 이 대상 하나와만 호핑을 맺습니다(여러 기기 동시 호핑은 아직 미지원).</string></property>
+           <property name="text"><string>※ 유니캐스트 모드에서 "기기 조회"로 대상을 먼저 고르세요. 시드 폴더에서 펌웨어 버전을 선택한 뒤 "전송 시작"을 누르면 새 public_seed 생성 → HMAC-SHA256 세션 시드 파생 → FHSS 활성화 → 전송이 한 번에 진행됩니다(브로드캐스트는 호핑 없이 그대로 전송). 이 대상 하나와만 호핑을 맺습니다(여러 기기 동시 호핑은 아직 미지원).</string></property>
            <property name="styleSheet"><string notr="true">color:#7f8c8d; font-size:11px;</string></property>
            <property name="wordWrap"><bool>true</bool></property>
           </widget>
          </item>
          <item>
           <layout class="QHBoxLayout" name="fhssButtonLayout">
-           <item>
-            <widget class="QPushButton" name="fhssActivateButton">
-             <property name="text"><string>FHSS 활성화</string></property>
-            </widget>
-           </item>
            <item>
             <widget class="QPushButton" name="fhssStopButton">
              <property name="enabled"><bool>false</bool></property>

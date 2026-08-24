@@ -42,9 +42,9 @@ private slots:
     void onSelectFileClicked();
     void onStartClicked();
     void onPauseClicked();
-    void onHopSeedRandomClicked();
+    void onSecretSeedFolderBrowseClicked();
+    void onSecretSeedRefreshClicked();
     void onDiscoverClicked();
-    void onFhssActivateClicked();
     void onFhssStopClicked();
     void onFhssStatusTick(); // m_fhssStatusTimer가 주기 호출 — getFhssStatus() 표시 갱신
     void onSessionTick(); // m_tickTimer가 주기 호출 — OtaSession::tick()으로 그대로 넘김
@@ -68,12 +68,37 @@ private:
     // 에서만 건드려야 하므로 — discoverDevices() 자체가 blocking이라
     // (discovery.h 주석) 워커 스레드로 뺀 이유는 design-notes 44절 참고)
     void handleDiscoveredDevices(const std::vector<DiscoveredDevice> &devices);
-    // onFhssActivateClicked()가 백그라운드 QThread에서 rolloutFhssConfig()+
-    // configureFhss()+startFhss()를 다 돌린 뒤, invokeMethod(Qt::QueuedConnection)로
-    // GUI 스레드에서 이 함수를 불러 버튼/상태 라벨을 갱신함. Cc1101Status 등
-    // CC1101 전용 타입을 헤더에 안 끌고 오려고(다른 곳과 같은 이유) 결과를
-    // bool/문자열로만 넘김 — 상세는 design-notes 45절 참고
+    // onStartClicked()가(유니캐스트일 때만) 백그라운드 QThread에서
+    // rolloutFhssConfig()+configureFhss()+startFhss()를 다 돌린 뒤,
+    // invokeMethod(Qt::QueuedConnection)로 GUI 스레드에서 이 함수를 불러
+    // 버튼/상태 라벨을 갱신함. Cc1101Status 등 CC1101 전용 타입을 헤더에 안
+    // 끌고 오려고(다른 곳과 같은 이유) 결과를 bool/문자열로만 넘김 — 상세는
+    // design-notes 45절 참고. m_pendingOtaAfterFhss가 서 있으면 성공 시
+    // beginOtaSessionNow()까지 이어서 부름(전송시작 한 번으로 활성화+전송이
+    // 다 되도록 흡수한 지점 — otamanager.ui fhssGroup 상단 주석 참고).
     void handleFhssActivationResult(bool activated, uint32_t sessionId, const QString &message);
+    // onStartClicked()에서 분리한 FHSS 활성화 워커 착수부. hopSeed는 이미
+    // secret_seed(txt 드롭다운)+새로 뽑은 public_seed로 HMAC-SHA256 파생을
+    // 끝낸 값이며, 여기서는 그 값을 그대로 기존 rolloutFhssConfig()/
+    // configureFhss()/startFhss() 파이프라인에 넘기기만 한다(파생 로직 자체는
+    // 건드리지 않음).
+    void activateFhssAsync(
+        uint32_t targetDeviceId,
+        uint32_t sessionId,
+        uint32_t hopSeed,
+        uint8_t channelCount,
+        uint8_t firstChannel,
+        uint32_t generation
+    );
+    // (구)onStartClicked() 후반부 — OtaSession을 실제로 만들어 start()하고
+    // 화면을 갱신하는 부분. 브로드캐스트는 onStartClicked()가 바로 부르고,
+    // 유니캐스트는 activateFhssAsync() 성공 뒤 handleFhssActivationResult()가
+    // 이어서 부른다.
+    void beginOtaSessionNow(uint32_t targetDeviceId, uint32_t sessionId);
+    // secretSeedFolderEdit이 가리키는 폴더를 core/hopseed.h의
+    // scanSecretSeedFolder()로 스캔해 secretSeedVersionCombo를 다시 채운다.
+    // 생성자(loadSettings 직후)와 "새로고침"/"폴더 선택" 버튼에서 부름.
+    void refreshSecretSeedList();
     // m_transport는 std::unique_ptr<ITransport>(기반 클래스) 타입이라서
     // stopFhss()/configureFhss() 같은 CC1101 전용 메서드(ITransport 계약
     // 밖, cc1101transport.h의 Cc1101Transport에만 있음)를 m_transport->로
@@ -93,6 +118,11 @@ private:
     QString m_selectedFilePath;
     qint64 m_selectedFileSize = 0;
 
+    // secretSeedVersionCombo를 채우는 *.txt 파일들이 있는 폴더. 기본값은
+    // loadSettings()가 실행 파일 옆 firmware_seeds/로 정하고, "폴더 선택"으로
+    // 바꾸면 QSettings에 저장돼 다음 실행에도 유지됨.
+    QString m_secretSeedFolder;
+
     // 화면이 소유하는 실제 전송 계층 + 세션. 둘 다 "연결"/"전송 시작" 버튼을
     // 누르기 전까지는 비어있다(nullptr) — otasession.h/itransport.h가 Qt 의존성
     // 없는 순수 C++이라 unique_ptr로 그대로 들고 있을 수 있음.
@@ -110,5 +140,12 @@ private:
     uint32_t m_fhssSessionId = 0;      // FHSS_CONFIG/ACTIVATE에 쓴 session_id — 이후 OtaSession::start()에 그대로 재사용
     uint32_t m_fhssTargetDeviceId = 0; // 활성화 당시 targetCombo에서 골랐던 대상(활성화 후 콤보가 바뀌어도 유지)
     QTimer *m_fhssStatusTimer = nullptr; // 활성화 중일 때만 getFhssStatus()를 주기 호출(500ms)해 fhssStatusLabel 갱신
+
+    // 전송시작 흡수(2026-08-24) — activateFhssAsync() 워커가 끝난 뒤
+    // handleFhssActivationResult()가 이어서 OTA 세션까지 시작해야 하는지
+    // 판단하는 플래그/대상. onFhssStopClicked() 등 activateFhssAsync()를
+    // 거치지 않는 경로에서는 항상 false로 남아있어야 함.
+    bool m_pendingOtaAfterFhss = false;
+    uint32_t m_pendingOtaTargetDeviceId = 0;
 };
 #endif // OTAMANAGER_H

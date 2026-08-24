@@ -82,3 +82,7 @@ CMakeLists.txt.user*
 .uic/
 /build*/
 /.qtcreator/
+
+# secretSeedFolderEdit 기본 경로(core/hopseed.h scanSecretSeedFolder() 대상) —
+# 실제 secret_seed txt 파일들. 평문 비밀값이라 커밋 금지, 팀 내부 채널로만 공유.
+/firmware_seeds/

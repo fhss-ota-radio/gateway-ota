@@ -52,6 +52,8 @@ add_library(ota_core STATIC
     core/binsplitter.cpp
     core/sha256.h
     core/sha256.cpp
+    core/hopseed.h
+    core/hopseed.cpp
     session/simplesender.h
     session/simplesender.cpp
     session/simplereceiver.h
@@ -169,6 +171,20 @@ target_link_libraries(ota_fhssrollout_tests
         ota_core
 )
 add_test(NAME ota_fhssrollout_tests COMMAND ota_fhssrollout_tests)
+
+# ---------- ota_hopseed_tests: deriveSessionHopSeed()/scanSecretSeedFolder()(core/hopseed.h) 검증 ----------
+# firmware-esp32(fhss_audio_adapter.c derive_session_hop_seed())와 같은
+# HMAC-SHA256 파생값을 계산하는지 알려진 테스트 벡터로 확인 — 두 기기가
+# 다른 hop_seed를 계산하면 홉이 어긋나 통신 자체가 안 되므로 회귀 시
+# 치명적이라 별도 타깃으로 분리.
+add_executable(ota_hopseed_tests
+    tests/tst_hopseed.cpp
+)
+target_link_libraries(ota_hopseed_tests
+    PRIVATE
+        ota_core
+)
+add_test(NAME ota_hopseed_tests COMMAND ota_hopseed_tests)
 
 # ---------- ota_smoke_send / ota_smoke_recv: 실기기(CC1101) 스모크테스트용 CLI ----------
 # /dev/cc1101이 실제로 있어야 동작하는 수동 실행 도구라서 add_test()에는 등록하지

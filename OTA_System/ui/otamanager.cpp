@@ -3,18 +3,19 @@
 
 #include "cc1101transport.h" // Cc1101Transport — driverCombo에서 "CC1101" 선택 시 실제로 생성
 #include "fhssrollout.h"     // FhssHopPolicy/rolloutFhssConfig() — FHSS CONFIG/ACTIVATE 핸드셰이크
+#include "hopseed.h"         // deriveSessionHopSeed()/scanSecretSeedFolder() — firmware-esp32와 같은 HMAC-SHA256 세션 시드 파생
 
 extern "C" {
 #include "ota_protocol.h" // OTA_BROADCAST_DEVICE_ID
 }
 
 #include <QCloseEvent>
+#include <QCoreApplication>
 #include <QDateTime>
+#include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QRandomGenerator>
-#include <QRegularExpression>
-#include <QRegularExpressionValidator>
 #include <QSettings>
 #include <QThread>
 #include <QTimer>
@@ -28,6 +29,7 @@ OtaManager::OtaManager(QWidget *parent)
     ui->setupUi(this);
     setupConnections();
     loadSettings();
+    refreshSecretSeedList();
 
     // 청크 크기는 사용자가 정하는 값이 아니라 OTA_MAX_PAYLOAD_SIZE(무선 패킷
     // 본문 최대 크기에서 정해지는 프로토콜 고정값)라서, .ui의 텍스트를 여기서
@@ -82,19 +84,10 @@ void OtaManager::setupConnections()
     connect(ui->selectFileButton, &QPushButton::clicked, this, &OtaManager::onSelectFileClicked);
     connect(ui->startButton, &QPushButton::clicked, this, &OtaManager::onStartClicked);
     connect(ui->pauseButton, &QPushButton::clicked, this, &OtaManager::onPauseClicked);
-    connect(ui->hopSeedRandomButton, &QPushButton::clicked, this, &OtaManager::onHopSeedRandomClicked);
+    connect(ui->secretSeedFolderBrowseButton, &QPushButton::clicked, this, &OtaManager::onSecretSeedFolderBrowseClicked);
+    connect(ui->secretSeedRefreshButton, &QPushButton::clicked, this, &OtaManager::onSecretSeedRefreshClicked);
     connect(ui->discoverButton, &QPushButton::clicked, this, &OtaManager::onDiscoverClicked);
-    connect(ui->fhssActivateButton, &QPushButton::clicked, this, &OtaManager::onFhssActivateClicked);
     connect(ui->fhssStopButton, &QPushButton::clicked, this, &OtaManager::onFhssStopClicked);
-
-    // 호핑 난수(FHSS seed)는 uint32_t(0~4294967295) 범위라 QIntValidator(int
-    // 범위, ~21억까지)로는 못 담아서 QRegularExpressionValidator로 숫자만
-    // 입력되게 막고(최대 10자리), 실제 범위 초과 여부는 쓰는 시점(현재는
-    // onHopSeedRandomClicked()뿐, 나중에 파이/ESP32 연동 시 여기서 같이 검사)에
-    // 확인하는 방식으로 함 — kernel-cc1101-spi의 cc1101_fhss_hop_policy.seed와
-    // 같은 타입(uint32_t)에 맞춘 것 (조사 결과는 디자인노트 참고)
-    auto *hopSeedValidator = new QRegularExpressionValidator(QRegularExpression(QStringLiteral("[0-9]{0,10}")), this);
-    ui->hopSeedEdit->setValidator(hopSeedValidator);
 }
 
 void OtaManager::loadSettings()
@@ -104,9 +97,12 @@ void OtaManager::loadSettings()
     const QString port = settings.value(QStringLiteral("transport/port"), QStringLiteral("/dev/cc1101")).toString();
     const int driverIndex = settings.value(QStringLiteral("transport/driverIndex"), 0).toInt();
     const bool broadcast = settings.value(QStringLiteral("target/broadcast"), false).toBool();
-    // 기본값 없음(빈 문자열) — 코드에 시드를 하드코딩하지 않기 위해서.
-    // 사용자가 직접 입력하거나 "무작위 생성"으로 채워야 함
-    const QString hopSeed = settings.value(QStringLiteral("fhss/hopSeed"), QString()).toString();
+    // 기본값: 실행 파일 옆의 firmware_seeds/ 폴더. 존재 여부는 refreshSecretSeedList()가
+    // 처음 스캔할 때 확인/생성하므로 여기서는 경로 문자열만 정한다.
+    const QString defaultSecretSeedFolder =
+        QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("firmware_seeds"));
+    m_secretSeedFolder =
+        settings.value(QStringLiteral("fhss/secretSeedFolder"), defaultSecretSeedFolder).toString();
     const int channelCount = settings.value(QStringLiteral("fhss/channelCount"), 8).toInt();
     const int firstChannel = settings.value(QStringLiteral("fhss/firstChannel"), 1).toInt();
     const int generation = settings.value(QStringLiteral("fhss/generation"), 1).toInt();
@@ -118,7 +114,7 @@ void OtaManager::loadSettings()
         ui->broadcastRadio->setChecked(true);
     else
         ui->unicastRadio->setChecked(true);
-    ui->hopSeedEdit->setText(hopSeed);
+    ui->secretSeedFolderEdit->setText(m_secretSeedFolder);
     ui->fhssChannelCountSpin->setValue(channelCount);
     ui->fhssFirstChannelSpin->setValue(firstChannel);
     ui->fhssGenerationSpin->setValue(generation);
@@ -130,10 +126,66 @@ void OtaManager::saveSettings()
     settings.setValue(QStringLiteral("transport/port"), ui->portEdit->text());
     settings.setValue(QStringLiteral("transport/driverIndex"), ui->driverCombo->currentIndex());
     settings.setValue(QStringLiteral("target/broadcast"), ui->broadcastRadio->isChecked());
-    settings.setValue(QStringLiteral("fhss/hopSeed"), ui->hopSeedEdit->text());
+    settings.setValue(QStringLiteral("fhss/secretSeedFolder"), m_secretSeedFolder);
     settings.setValue(QStringLiteral("fhss/channelCount"), ui->fhssChannelCountSpin->value());
     settings.setValue(QStringLiteral("fhss/firstChannel"), ui->fhssFirstChannelSpin->value());
     settings.setValue(QStringLiteral("fhss/generation"), ui->fhssGenerationSpin->value());
+}
+
+void OtaManager::refreshSecretSeedList()
+{
+    // 폴더가 아직 없으면(첫 실행 등) 조용히 만들어둠 — 사용자가 어디에 txt를
+    // 두면 되는지 굳이 에러로 알려줄 필요 없이 폴더 자체가 나타나면 됨.
+    QDir().mkpath(m_secretSeedFolder);
+
+    const QString previousSelectedLabel = ui->secretSeedVersionCombo->currentText();
+
+    std::vector<std::string> skipped;
+    const std::vector<SecretSeedEntry> entries =
+        scanSecretSeedFolder(m_secretSeedFolder.toStdString(), &skipped);
+
+    ui->secretSeedVersionCombo->clear();
+    for (const SecretSeedEntry &entry : entries) {
+        const uint32_t packed = (static_cast<uint32_t>(entry.secretSeed[0]) << 24) |
+                                 (static_cast<uint32_t>(entry.secretSeed[1]) << 16) |
+                                 (static_cast<uint32_t>(entry.secretSeed[2]) << 8) |
+                                 static_cast<uint32_t>(entry.secretSeed[3]);
+        ui->secretSeedVersionCombo->addItem(
+            QString::fromStdString(entry.versionLabel), QVariant(packed));
+    }
+
+    // 새로고침 전에 골라둔 항목이 새 목록에도 그대로 있으면 선택을 유지함 —
+    // 폴더에 파일을 하나 더 추가하고 새로고침했을 때 기존 선택이 풀리면
+    // 번거로우므로.
+    if (!previousSelectedLabel.isEmpty()) {
+        const int restoredIndex = ui->secretSeedVersionCombo->findText(previousSelectedLabel);
+        if (restoredIndex >= 0)
+            ui->secretSeedVersionCombo->setCurrentIndex(restoredIndex);
+    }
+
+    for (const std::string &name : skipped) {
+        appendLog(QStringLiteral("WARN"),
+                  tr("시드 파일 형식이 올바르지 않아 건너뜀: %1 (8자리 16진수 한 줄이어야 함)")
+                      .arg(QString::fromStdString(name)));
+    }
+    appendLog(QStringLiteral("INFO"),
+              tr("시드 폴더 조회: %1 (%2개)").arg(m_secretSeedFolder).arg(entries.size()));
+}
+
+void OtaManager::onSecretSeedFolderBrowseClicked()
+{
+    const QString folder = QFileDialog::getExistingDirectory(
+        this, tr("secret_seed 폴더 선택"), m_secretSeedFolder);
+    if (folder.isEmpty())
+        return;
+    m_secretSeedFolder = folder;
+    ui->secretSeedFolderEdit->setText(m_secretSeedFolder);
+    refreshSecretSeedList();
+}
+
+void OtaManager::onSecretSeedRefreshClicked()
+{
+    refreshSecretSeedList();
 }
 
 Cc1101Transport *OtaManager::fhssTransport() const
@@ -203,7 +255,6 @@ void OtaManager::onConnectClicked()
                 (void)cc1101->stopFhss();
             m_fhssActive = false;
             ui->fhssStatusLabel->setText(tr("비활성"));
-            ui->fhssActivateButton->setEnabled(true);
             ui->fhssStopButton->setEnabled(false);
         }
         m_session.reset();
@@ -327,15 +378,62 @@ void OtaManager::onStartClicked()
         targetDeviceId = selected.toUInt();
     }
 
-    // FHSS가 이 대상과 이미 활성화돼 있으면(onFhssActivateClicked() 참고),
-    // FHSS_CONFIG/ACTIVATE 때 쓴 session_id를 OtaSession에도 그대로 재사용함
-    // — smoke_fhss_ota_transfer_main.cpp 21~23행 주석과 같은 이유("이 실행
-    // 한 번이 하나의 세션"이라는 개념을 일관되게 유지, 로그 추적도 쉬움).
-    // 0을 넘기면(FHSS 비활성 또는 대상이 다름) OtaSession이 내부적으로
-    // 새 session_id를 무작위 생성함(otasession.h start() 기본값 0의 의미).
-    const uint32_t sessionIdToReuse =
-        (m_fhssActive && targetDeviceId == m_fhssTargetDeviceId) ? m_fhssSessionId : 0;
+    // 브로드캐스트는 호핑 없이 그대로 전송함 — FHSS는 대상 기기 하나와만
+    // 맺을 수 있어(rolloutFhssConfig()가 기기 하나씩만 처리하는 설계,
+    // fhssrollout.h 참고) 브로드캐스트와는 애초에 양립 불가능.
+    if (!ui->unicastRadio->isChecked()) {
+        beginOtaSessionNow(targetDeviceId, 0);
+        return;
+    }
 
+    // 2026-08-24 개편: "FHSS 활성화" 버튼을 없애고, "전송 시작" 한 번으로
+    // secret_seed 선택 → public_seed 무작위 생성 → HMAC-SHA256 세션 시드
+    // 파생 → FHSS 활성화 → OTA 전송까지 이어지도록 흡수함(otamanager.ui
+    // fhssGroup 상단 주석 참고). 매 전송마다 새 public_seed로 다시
+    // 활성화하므로(activateFhssAsync() 워커가 stopFhss()로 이전 상태를
+    // 먼저 정리) 세션마다 홉 패턴이 겹치지 않는다 — public_seed를 딱
+    // 한 번만 뽑아 계속 재사용하면 그 세션 홉 패턴이 평문 public_seed만
+    // 으로 예측 가능해지는 것과 같은 문제(firmware-esp32
+    // derive_session_hop_seed() 주석 참고).
+    const QVariant selectedSeed = ui->secretSeedVersionCombo->currentData();
+    if (!selectedSeed.isValid()) {
+        appendLog(QStringLiteral("WARN"),
+                  tr("먼저 \"시드 폴더\"에서 펌웨어 버전(secret_seed)을 선택하세요"));
+        return;
+    }
+    const uint32_t packedSecretSeed = selectedSeed.toUInt();
+    const SecretSeed secretSeed = {
+        static_cast<uint8_t>((packedSecretSeed >> 24) & 0xFFU),
+        static_cast<uint8_t>((packedSecretSeed >> 16) & 0xFFU),
+        static_cast<uint8_t>((packedSecretSeed >> 8) & 0xFFU),
+        static_cast<uint8_t>(packedSecretSeed & 0xFFU),
+    };
+    const uint32_t publicSeed = QRandomGenerator::global()->generate();
+    const uint32_t hopSeed = deriveSessionHopSeed(secretSeed, publicSeed);
+    appendLog(QStringLiteral("INFO"),
+              tr("세션 시드 파생 (HMAC-SHA256): 펌웨어 버전=%1, public_seed=%2")
+                  .arg(ui->secretSeedVersionCombo->currentText())
+                  .arg(publicSeed));
+
+    const uint8_t channelCount = static_cast<uint8_t>(ui->fhssChannelCountSpin->value());
+    const uint8_t firstChannel = static_cast<uint8_t>(ui->fhssFirstChannelSpin->value());
+    const uint32_t generation = static_cast<uint32_t>(ui->fhssGenerationSpin->value());
+    // FHSS_CONFIG/ACTIVATE 핸드셰이크와 그 다음 beginOtaSessionNow()의
+    // OtaSession::start() 양쪽에서 같은 session_id를 쓰기 위해 여기서
+    // 미리 뽑아둠(smoke_fhss_ota_transfer_main.cpp 21~23행 주석과 같은 이유).
+    const uint32_t sessionId = QRandomGenerator::global()->generate();
+
+    m_pendingOtaAfterFhss = true;
+    m_pendingOtaTargetDeviceId = targetDeviceId;
+    // activateFhssAsync()가 끝나기 전(핸드셰이크+2초 정착 대기, 보통 3~5초)
+    // 중복 클릭을 막음 — activateFhssAsync() 자신도 m_fhssBusy로 같은 걸
+    // 막지만, 그 플래그는 워커 착수 이후에나 서므로 여기서 한 번 더 막아둠.
+    ui->startButton->setEnabled(false);
+    activateFhssAsync(targetDeviceId, sessionId, hopSeed, channelCount, firstChannel, generation);
+}
+
+void OtaManager::beginOtaSessionNow(uint32_t targetDeviceId, uint32_t sessionId)
+{
     m_retransmitEventCount = 0;
     // otasession.h 67~72행 기본값(batchSize=5, timeoutMs=300, maxRetry=5,
     // chunkDelayMs=40) 그대로 씀 — 전부 실기기 검증으로 확정된 값
@@ -343,10 +441,11 @@ void OtaManager::onStartClicked()
     m_session = std::make_unique<OtaSession>(*m_transport);
     m_session->setOnStateChanged([this](OtaSessionState state) { handleSessionStateChanged(state); });
 
-    if (!m_session->start(m_selectedFilePath.toStdString(), targetDeviceId, sessionIdToReuse)) {
+    if (!m_session->start(m_selectedFilePath.toStdString(), targetDeviceId, sessionId)) {
         appendLog(QStringLiteral("ERROR"),
                   tr("전송 시작 실패: %1").arg(QString::fromStdString(m_session->errorMessage())));
         m_session.reset();
+        ui->startButton->setEnabled(true);
         return;
     }
 
@@ -356,7 +455,7 @@ void OtaManager::onStartClicked()
     appendLog(QStringLiteral("INFO"),
               tr("전송 시작 (session_id=0x%1, %2%3)")
                   .arg(QString::number(m_session->sessionId(), 16), m_selectedFilePath,
-                       sessionIdToReuse != 0 ? tr(", FHSS 호핑 중") : QString()));
+                       sessionId != 0 ? tr(", FHSS 호핑 중") : QString()));
     updateProgressUi();
 }
 
@@ -445,24 +544,6 @@ void OtaManager::updateProgressUi()
     ui->progressStatusLabel->setText(QString::fromUtf8(otaSessionStateName(m_session->state())));
 }
 
-void OtaManager::onHopSeedRandomClicked()
-{
-    // QRandomGenerator::global()이 uint32_t 그대로인 quint32를 뽑아주므로
-    // kernel-cc1101-spi의 cc1101_fhss_hop_policy.seed(uint32_t)와 범위가
-    // 정확히 맞음 — 나중에 실제로 파이/ESP32에 넘길 때 값 변환이 필요 없음.
-    //
-    // TODO(다음 단계): 지금은 화면에만 값을 채우고 끝 — 실제로 라즈베리파이
-    // CC1101 드라이버(ioctl CC1101_IOC_FHSS_SET_CONFIG, kernel-cc1101-spi/
-    // cc1101_hop.c)에 넘기거나 ESP32로 전달하는 연동은 아직 없음. ESP32
-    // 쪽은 현재 시드 개념 자체가 없어서(순차 채널 배열만 하드코딩, 담당자
-    // 문서에 "시드 기반 셔플은 미구현"이라고 명시) 프로토콜 확장이 먼저
-    // 필요함 — 자세한 조사 내용은
-    // docs/note/design-notes-gateway-ota-es.md 참고
-    const quint32 seed = QRandomGenerator::global()->generate();
-    ui->hopSeedEdit->setText(QString::number(seed));
-    appendLog(QStringLiteral("INFO"), tr("호핑 난수 무작위 생성: %1").arg(seed));
-}
-
 void OtaManager::onDiscoverClicked()
 {
     if (!m_connected || !m_transport) {
@@ -549,84 +630,34 @@ void OtaManager::handleDiscoveredDevices(const std::vector<DiscoveredDevice> &de
     appendLog(QStringLiteral("INFO"), tr("기기 %1개 조회됨").arg(devices.size()));
 }
 
-void OtaManager::onFhssActivateClicked()
+void OtaManager::activateFhssAsync(
+    uint32_t targetDeviceId,
+    uint32_t sessionId,
+    uint32_t hopSeed,
+    uint8_t channelCount,
+    uint8_t firstChannel,
+    uint32_t generation
+)
 {
-    if (!m_connected || !m_transport) {
-        appendLog(QStringLiteral("WARN"), tr("먼저 연결하세요"));
-        return;
-    }
+    // 호출부(onStartClicked())가 연결/전송중/조회중/모드 확인을 이미 마치고
+    // 넘어오므로 여기서는 안 함 — m_fhssBusy만 방어적으로 한 번 더 확인
+    // (onStartClicked()가 startButton을 먼저 비활성화하지만, 그 사이 다른
+    // 경로로 재진입할 가능성을 대비).
     if (m_fhssBusy) {
         appendLog(QStringLiteral("WARN"), tr("이미 FHSS 처리 중입니다"));
         return;
     }
-    if (m_discovering) {
-        appendLog(QStringLiteral("WARN"), tr("기기 조회가 끝난 뒤 시도하세요"));
-        return;
-    }
-    if (m_session && m_session->state() != OtaSessionState::Idle
-        && m_session->state() != OtaSessionState::Completed
-        && m_session->state() != OtaSessionState::Failed) {
-        appendLog(QStringLiteral("WARN"), tr("전송이 진행 중입니다 — 완료/실패 후에 시도하세요"));
-        return;
-    }
-    if (m_fhssActive) {
-        appendLog(QStringLiteral("WARN"), tr("이미 활성화돼 있습니다 — 먼저 \"FHSS 중지\"를 누르세요"));
-        return;
-    }
-    // rolloutFhssConfig()는 기기를 한 번에 하나씩만 처리하는 설계라서
-    // (fhssrollout.h 39~45행 주석: ACK에 발신 기기 구분 필드가 없어서 병렬
-    // 처리가 불가능함) targetCombo에서 명시적으로 고른 기기 하나가 필요함 —
-    // 브로드캐스트나 "아직 조회 안 함" 상태로는 시작할 수 없음.
-    if (!ui->unicastRadio->isChecked()) {
-        appendLog(QStringLiteral("WARN"), tr("FHSS는 유니캐스트 모드에서 대상을 고른 뒤에만 가능합니다"));
-        return;
-    }
-    const QVariant selected = ui->targetCombo->currentData();
-    if (!selected.isValid()) {
-        appendLog(QStringLiteral("WARN"),
-                  tr("먼저 \"기기 조회 (DISCOVER)\"로 대상을 찾은 뒤 목록에서 선택하세요"));
-        return;
-    }
-    const uint32_t targetDeviceId = selected.toUInt();
 
     // fhssTransport()가 nullptr이면(지금은 사실상 항상 CC1101이라 안 일어나지만,
     // 나중에 로컬 파일 드라이버가 생기면 그때는 진짜로 nullptr이 됨) FHSS
     // 자체를 쓸 수 없는 드라이버라는 뜻 — 워커 스레드를 만들기 전에 여기서 막음.
     Cc1101Transport *fhssTransportPtr = fhssTransport();
     if (!fhssTransportPtr) {
-        appendLog(QStringLiteral("WARN"), tr("이 드라이버는 FHSS를 지원하지 않습니다 (CC1101만 지원)"));
+        handleFhssActivationResult(false, 0, tr("이 드라이버는 FHSS를 지원하지 않습니다 (CC1101만 지원)"));
         return;
     }
-
-    // 시드가 비어있으면 여기서 바로 무작위로 채움(onHopSeedRandomClicked()와
-    // 같은 로직) — 매번 "무작위 생성"을 따로 누르게 하지 않기 위한 편의.
-    if (ui->hopSeedEdit->text().isEmpty()) {
-        const quint32 seed = QRandomGenerator::global()->generate();
-        ui->hopSeedEdit->setText(QString::number(seed));
-        appendLog(QStringLiteral("INFO"), tr("호핑 난수 무작위 생성: %1").arg(seed));
-    }
-    // setupConnections()의 QRegularExpressionValidator("[0-9]{0,10}")는 자릿수만
-    // 막지, uint32_t 범위(~42억) 초과는 안 막아준다("실제 범위 초과 여부는
-    // 쓰는 시점에 확인" — 그 주석이 가리키던 바로 이 시점) — 여기서 확인.
-    bool seedOk = false;
-    const uint32_t seed = ui->hopSeedEdit->text().toUInt(&seedOk);
-    if (!seedOk) {
-        appendLog(QStringLiteral("WARN"),
-                  tr("호핑 난수가 uint32 범위(0~4294967295)를 벗어났습니다 — 값을 확인하세요"));
-        return;
-    }
-    const uint8_t channelCount = static_cast<uint8_t>(ui->fhssChannelCountSpin->value());
-    const uint8_t firstChannel = static_cast<uint8_t>(ui->fhssFirstChannelSpin->value());
-    const uint32_t generation = static_cast<uint32_t>(ui->fhssGenerationSpin->value());
-    // FHSS_CONFIG/ACTIVATE 핸드셰이크와 그 다음 OtaSession::start() 양쪽에서
-    // 같은 session_id를 쓰기 위해 여기서 미리 뽑아둠(smoke_fhss_ota_transfer_main.cpp
-    // 21~23행 주석과 같은 이유) — GUI 스레드에서 뽑아서 워커 스레드로 값만
-    // 넘기고, 성공하면 handleFhssActivationResult()에서 m_fhssSessionId에 저장함.
-    const uint32_t sessionId = QRandomGenerator::global()->generate();
 
     m_fhssBusy = true;
-    ui->fhssActivateButton->setEnabled(false);
-    ui->fhssActivateButton->setText(tr("활성화 중..."));
     ui->fhssStatusLabel->setText(tr("CONFIG/ACTIVATE 전송 중..."));
     appendLog(QStringLiteral("INFO"),
               tr("FHSS 활성화 시작: target=0x%1 channel_count=%2 first_channel=%3 generation=%4")
@@ -643,7 +674,7 @@ void OtaManager::onFhssActivateClicked()
     // 메서드가 ITransport 인터페이스엔 없어서 ITransport*로는 호출이 아예
     // 컴파일이 안 됨(fhssTransport() 주석 참고).
     Cc1101Transport *transport = fhssTransportPtr;
-    QThread *worker = QThread::create([this, transport, targetDeviceId, sessionId, seed,
+    QThread *worker = QThread::create([this, transport, targetDeviceId, sessionId, hopSeed,
                                         channelCount, firstChannel, generation]() {
         const auto logLine = [this](const QString &msg) {
             QMetaObject::invokeMethod(
@@ -668,7 +699,7 @@ void OtaManager::onFhssActivateClicked()
         policy.rendezvousChannel = firstChannel; // 프로토콜 검증 조건: rendezvous == first
         policy.channelCount = channelCount;
         policy.reservedChannel = 0; // OTA 전용 채널 0 — 호핑 범위에서 제외
-        policy.seed = seed;
+        policy.seed = hopSeed; // secret_seed+public_seed를 HMAC-SHA256으로 조합한 세션 hop_seed(onStartClicked() 참고)
         policy.slotDurationUs = 300000;       // smoke_fhss_activate_main.cpp와 동일값(hop_policy 주석 기준)
         policy.channelSwitchGuardUs = 5000;   // 위와 동일
 
@@ -784,8 +815,6 @@ void OtaManager::onFhssStopClicked()
     (void)transport->startRx();
 
     m_fhssActive = false;
-    ui->fhssActivateButton->setEnabled(true);
-    ui->fhssActivateButton->setText(tr("FHSS 활성화"));
     ui->fhssStopButton->setEnabled(false);
     ui->fhssStatusLabel->setText(tr("비활성"));
     appendLog(QStringLiteral("INFO"),
@@ -820,20 +849,22 @@ void OtaManager::onFhssStatusTick()
 void OtaManager::handleFhssActivationResult(bool activated, uint32_t sessionId, const QString &message)
 {
     m_fhssBusy = false;
-    ui->fhssActivateButton->setText(tr("FHSS 활성화"));
 
     if (!activated) {
-        ui->fhssActivateButton->setEnabled(true);
         ui->fhssStopButton->setEnabled(false);
         ui->fhssStatusLabel->setText(tr("비활성 (실패)"));
         appendLog(QStringLiteral("ERROR"), message);
+        // activateFhssAsync()는 onStartClicked()가 전송을 흡수해서 부르므로,
+        // 활성화가 실패하면 그 뒤로 이어질 예정이었던 OTA 세션도 시작하지
+        // 않고 여기서 포기함 — startButton을 도로 눌러쓸 수 있게 되돌림.
+        m_pendingOtaAfterFhss = false;
+        ui->startButton->setEnabled(true);
         return;
     }
 
     m_fhssActive = true;
     m_fhssSessionId = sessionId;
-    // m_fhssTargetDeviceId는 onFhssActivateClicked() 끝에서 이미 저장해둠
-    ui->fhssActivateButton->setEnabled(false); // 재설정하려면 먼저 중지해야 함
+    // m_fhssTargetDeviceId는 activateFhssAsync() 끝에서 이미 저장해둠
     ui->fhssStopButton->setEnabled(true);
     ui->fhssStatusLabel->setText(message);
     appendLog(QStringLiteral("INFO"), tr("FHSS 활성화 성공 (session_id=0x%1): %2")
@@ -842,4 +873,11 @@ void OtaManager::handleFhssActivationResult(bool activated, uint32_t sessionId, 
     // generation은 "오래된 설정 거르기" 용도라, 재활성화할 때 같은 값을
     // 실수로 재사용하지 않도록 성공할 때마다 자동으로 1 올려둠.
     ui->fhssGenerationSpin->setValue(ui->fhssGenerationSpin->value() + 1);
+
+    // 2026-08-24: "전송 시작"이 활성화까지 흡수했으므로, 활성화가 방금
+    // 끝났다면 이어서 실제 OTA 세션을 시작함 — onStartClicked() 참고.
+    if (m_pendingOtaAfterFhss) {
+        m_pendingOtaAfterFhss = false;
+        beginOtaSessionNow(m_pendingOtaTargetDeviceId, sessionId);
+    }
 }
