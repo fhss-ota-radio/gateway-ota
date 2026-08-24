@@ -82,12 +82,24 @@ constexpr int kSyncSettleMs = 2000;
 constexpr int kSlotPollMs = 2;
 constexpr int kPostSyncGuardMs = 25;
 constexpr int kSlotGateTimeoutMs = 1200;
+// [2026-08-24 추가, perf/fhss-slot-batch-tx] 슬롯 하나당 패킷 하나씩만
+// 보내던 게 너무 느려서(슬롯 300ms마다 1개 = 7825청크면 40분 가까이) 같은
+// 슬롯 안에서 여러 개를 연달아 보내도록 바꿈. 앞쪽(kPostSyncGuardMs)은
+// 그대로 두고, 뒤쪽에도 이만큼(kTailGuardMs) 여유를 남겨서 다음 슬롯
+// 경계(=다음 SYNC 송신 시점)와 안 겹치게 함 — 아직 실기기로 잰 값이
+// 아니라 "합리적인 추정치"라서, 첫 실기기 테스트 로그(각 전송이 안전
+// 창의 몇 ms 지점에서 나갔는지)를 보고 좁혀나갈 것.
+constexpr int kTailGuardMs = 40;
 
 class SlotAwareTransport final : public ITransport
 {
 public:
-    SlotAwareTransport(Cc1101Transport &transport, uint32_t generation)
-        : m_transport(transport), m_generation(generation)
+    // slotDurationUs: FhssHopPolicy::slotDurationUs를 그대로 받음 — 안전
+    // 창이 이번 슬롯 안에서 아직 안 닫혔는지 판단하려면 슬롯 길이를 알아야
+    // 하는데, 예전엔 이 클래스가 몰라도 됐음(매번 다음 슬롯을 기다렸으니까).
+    SlotAwareTransport(Cc1101Transport &transport, uint32_t generation, uint32_t slotDurationUs)
+        : m_transport(transport), m_generation(generation),
+          m_slotDurationMs(static_cast<int64_t>(slotDurationUs) / 1000)
     {
     }
 
@@ -97,6 +109,74 @@ public:
 
     bool send(const std::vector<uint8_t> &packet) override
     {
+        if (!ensureSafeWindow())
+            return false;
+
+        const uint8_t type = packet.empty() ? 0 : packet.front();
+        const int64_t elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - m_windowOpenedAt).count();
+        std::cout << "[fhss_ota][slot_tx] type=" << static_cast<unsigned>(type)
+                  << " slot=" << m_openWindowSlot
+                  << " window_elapsed_ms=" << elapsedMs << "\n";
+
+        const bool ok = m_transport.send(packet);
+        if (!ok) {
+            // 실패했으면 이 창을 더 이상 못 믿음(예: 그 사이 동기화가
+            // 깨졌을 수도 있음) — 다음 send() 호출은 처음부터 다시 게이팅.
+            m_openWindowSlot = kNoWindow;
+        }
+        return ok;
+    }
+
+    std::vector<uint8_t> recv() override { return m_transport.recv(); }
+
+private:
+    static constexpr uint64_t kNoWindow = ~static_cast<uint64_t>(0);
+
+    bool usable(const Cc1101FhssStatus &status) const
+    {
+        return status.enabled && status.synchronized &&
+               status.role == static_cast<uint8_t>(Cc1101FhssRole::Master) &&
+               status.generation == m_generation && status.lastError == 0;
+    }
+
+    static void logGateFailure(const char *where, const Cc1101FhssStatus &status)
+    {
+        std::cerr << "[fhss_ota][slot_tx] " << where
+                  << " enabled=" << status.enabled
+                  << " synchronized=" << status.synchronized
+                  << " role=" << static_cast<unsigned>(status.role)
+                  << " generation=" << status.generation
+                  << " slot=" << status.currentSlot
+                  << " error=" << status.lastError << "\n";
+    }
+
+    // 지금 바로 send()해도 안전한 상태인지 확인한다.
+    //
+    // 이미 이번 슬롯에서 안전 창을 열어둔 상태(직전 send()가 같은 슬롯에서
+    // 성공)라면, 그 창이 아직 안 닫혔는지(같은 슬롯 + 뒤쪽 여유 충분)만
+    // 빠르게 확인하고 대기 없이 바로 통과시킨다 — 이게 "슬롯당 여러 개"의
+    // 핵심. 창이 없거나 이미 닫혔으면 예전 방식 그대로 다음 슬롯 경계까지
+    // 기다렸다가 새 창을 연다.
+    bool ensureSafeWindow()
+    {
+        if (m_openWindowSlot != kNoWindow) {
+            const auto status = m_transport.getFhssStatus();
+            const int64_t elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - m_windowOpenedAt).count();
+            // 창이 열린 시각(m_windowOpenedAt)은 대략 "슬롯 경계 + kPostSyncGuardMs"
+            // 지점이므로, 다음 슬롯 경계까지 남은 시간 ≈
+            // m_slotDurationMs - kPostSyncGuardMs - elapsedMs. 이게
+            // kTailGuardMs 이상 남아있어야 새로 보내도 안전하다고 봄.
+            const bool stillSameSlot = usable(status) && status.currentSlot == m_openWindowSlot;
+            const bool stillHasRoom =
+                elapsedMs + kTailGuardMs < m_slotDurationMs - kPostSyncGuardMs;
+            if (stillSameSlot && stillHasRoom)
+                return true; // 대기 없이 통과 — 슬롯당 여러 개 보내지는 지점
+
+            m_openWindowSlot = kNoWindow; // 창 닫힘(슬롯 바뀜/여유 부족/동기화 깨짐) -> 새로 게이팅
+        }
+
         const auto deadline = std::chrono::steady_clock::now()
             + std::chrono::milliseconds(kSlotGateTimeoutMs);
         auto status = m_transport.getFhssStatus();
@@ -122,12 +202,12 @@ public:
             if (!usable(verified) || verified.currentSlot != sendSlot)
                 continue;
 
-            const uint8_t type = packet.empty() ? 0 : packet.front();
-            std::cout << "[fhss_ota][slot_tx] type=" << static_cast<unsigned>(type)
-                      << " slot=" << sendSlot
+            m_openWindowSlot = sendSlot;
+            m_windowOpenedAt = std::chrono::steady_clock::now();
+            std::cout << "[fhss_ota][slot_tx] new window slot=" << sendSlot
                       << " channel=" << static_cast<unsigned>(verified.currentChannel)
                       << " post_sync_ms=" << kPostSyncGuardMs << "\n";
-            return m_transport.send(packet);
+            return true;
         }
 
         std::cerr << "[fhss_ota][slot_tx] safe slot timeout after "
@@ -135,29 +215,11 @@ public:
         return false;
     }
 
-    std::vector<uint8_t> recv() override { return m_transport.recv(); }
-
-private:
-    bool usable(const Cc1101FhssStatus &status) const
-    {
-        return status.enabled && status.synchronized &&
-               status.role == static_cast<uint8_t>(Cc1101FhssRole::Master) &&
-               status.generation == m_generation && status.lastError == 0;
-    }
-
-    static void logGateFailure(const char *where, const Cc1101FhssStatus &status)
-    {
-        std::cerr << "[fhss_ota][slot_tx] " << where
-                  << " enabled=" << status.enabled
-                  << " synchronized=" << status.synchronized
-                  << " role=" << static_cast<unsigned>(status.role)
-                  << " generation=" << status.generation
-                  << " slot=" << status.currentSlot
-                  << " error=" << status.lastError << "\n";
-    }
-
     Cc1101Transport &m_transport;
     uint32_t m_generation;
+    int64_t m_slotDurationMs;
+    uint64_t m_openWindowSlot = kNoWindow;
+    std::chrono::steady_clock::time_point m_windowOpenedAt{};
 };
 
 } // namespace
@@ -296,7 +358,7 @@ int main(int argc, char *argv[])
     // smoke_session_send_main.cpp와 동일한 사용법 — transport.send()/recv()는
     // 지금이 어느 채널이든 그대로 동작한다(커널이 채널 전환을 알아서 함).
     std::cout << "[fhss_ota] 4단계: OtaSession으로 파일 전송 시작...\n";
-    SlotAwareTransport slotAwareTransport(transport, generation);
+    SlotAwareTransport slotAwareTransport(transport, generation, policy.slotDurationUs);
     if (chunkDelayMs != 0) {
         std::cout << "[fhss_ota] slot-aware TX가 패킷 간격을 소유하므로 chunkDelayMs="
                   << chunkDelayMs << "는 사용하지 않습니다.\n";
