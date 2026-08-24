@@ -38,6 +38,15 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
 > 충돌 없이 깔끔하게 합쳐짐 — 상세는
 > `docs/note/design-notes-gateway-ota-es.md` 43절.
 
+> **🔀 (2026-08-23) `fix/fhss-ota-slot-safe` 병합** — 실기기로
+> firmware-esp32 `fhss-ota-sync-recovery` 브랜치와 맞춰 전송 성공까지
+> 확인된 브랜치. `SlotAwareTransport`(슬롯 경계를 확인한 뒤에만 DATA를
+> 보내는 `ITransport` 래퍼)로 "DATA가 커널 SYNC 전송과 충돌해 호핑이
+> 깨지는" 근본 문제(41~42절부터 미해결이던 것)를 해결함. 충돌 없이
+> 자동 병합됨. **CLI(`ota_smoke_fhss_ota_transfer`)만 이 래퍼를 씀 —
+> Qt 화면은 아직 연결 안 됨**(다음 작업 대상) — 상세는
+> `docs/note/design-notes-gateway-ota-es.md` 46~47절.
+
 > **무선 손실 약 0.75%는 재전송(마일스톤 4)으로 메워야 합니다.**
 > 재조립 로직은 바이트 단위로 정확함이 검증됐지만, 재전송이 없으면
 > 원본과 동일한 파일을 보장할 수 없습니다. 상세는 `docs/roadmap.md` 4절.
