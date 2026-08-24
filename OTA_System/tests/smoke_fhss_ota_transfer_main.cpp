@@ -78,7 +78,32 @@ void printUsage(const char *argv0)
 // 실기기 로그: 3개 SYNC 패킷 검증 후 SYNC_ACQUIRED, slot_duration_us=300000
 // 기준 약 0.9~1.2초). 그 전에 OTA_START를 보내면 ESP32가 아직 OTA_FHSS_READY가
 // 아니라서 응답이 없을 수 있으므로, 여유를 둬서 기다린다.
-constexpr int kSyncSettleMs = 2000;
+//
+// [2026-08-24 정정: 2000 -> 4000] 위 "0.9~1.2초"는 **첫 SYNC를 이미 잡은
+// 뒤부터** 재는 시간이었다. 실제로는 그 앞에 "첫 SYNC를 잡기까지"가
+// 따로 있고, 이게 훨씬 길다:
+//
+//   ESP32는 ACTIVATE 직후 랑데부 채널(=first_channel, 보통 1번)에 고정된
+//   채 SYNC를 기다린다. 그런데 Gateway는 이미 8채널을 순회 중이라 1번
+//   채널로 돌아오는 건 8슬롯마다 = 300ms x 8 = 2.4초에 한 번뿐이다.
+//   즉 첫 SYNC까지 최악 2.4초 + 획득까지 3슬롯 0.9초 = 최악 3.3초.
+//
+// 2000ms는 이 최악값보다 짧아서, ESP32가 아직 SEARCHING인 상태에서
+// OTA_START/DATA가 먼저 도착한다. 그러면 ESP32는 그 DATA를 처리하느라
+// 바로 다음 SYNC를 놓치는데, 아직 "획득 전"(SYNCHRONIZING) 단계라
+// 관용이 없어서 기준점을 통째로 버리고 랑데부 채널로 되돌아간다 —
+// 그럼 또 2.4초를 기다려야 하고, 그 사이 DATA는 계속 오므로 같은 일이
+// 반복되어 영영 TRACKING에 못 간다. 결국 ESP32의 5초 동기화 타임아웃
+// (firmware-esp32 main/fsm.c OTA_FHSS_SYNC_TIMEOUT_MS)이 먼저 터져
+// 세션이 폐기된다.
+//
+// 148 실기기 로그(2026-08-24)에서 이 교착이 정확히 재현됐고, 세션이
+// 폐기되어 DATA가 멈추자마자 300ms 만에 깨끗이 SYNC_ACQUIRED까지 간
+// 것이 결정적 증거였다. 상세: design-notes-gateway-ota-es.md 54절.
+//
+// 최악 3.3초 + 여유를 두어 4000ms로 올린다. ESP32 쪽 타임아웃도 5초 ->
+// 10초로 함께 올려서, 이 대기가 오히려 타임아웃을 유발하지 않게 했다.
+constexpr int kSyncSettleMs = 4000;
 constexpr int kSlotPollMs = 2;
 constexpr int kPostSyncGuardMs = 25;
 constexpr int kSlotGateTimeoutMs = 1200;
