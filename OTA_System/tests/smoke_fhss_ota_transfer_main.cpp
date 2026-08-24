@@ -68,7 +68,7 @@ void printUsage(const char *argv0)
     std::cerr << "사용법: " << argv0
               << " <device_path> <bin_file> <session_id_hex> <target_id_hex> "
                  "<generation> [channel_count=8] [first_channel=1] [seed_hex=0] "
-                 "[batchSize=5] [chunkDelayMs=40] [timeoutMs=300] [maxRetry=5]\n"
+                 "[batchSize=5] [chunkDelayMs=40] [timeoutMs=300] [maxRetry=20]\n"
               << "  예: " << argv0
               << " /dev/cc1101 firmware.bin 0x1 A29E60 1 8 1 0x46485353\n";
 }
@@ -336,7 +336,20 @@ int main(int argc, char *argv[])
     const int batchSize = (argc >= 10) ? std::atoi(argv[9]) : 5;
     const int chunkDelayMs = (argc >= 11) ? std::atoi(argv[10]) : 40;
     const int timeoutMs = (argc >= 12) ? std::atoi(argv[11]) : 300;
-    const int maxRetry = (argc >= 13) ? std::atoi(argv[12]) : 5;
+    // [2026-08-24 정정: 기본값 5 -> 20] ESP32가 전송 중 SYNC를 잃으면
+    // 랑데부 채널로 돌아가 재동기화하는 데 최악 3.3초가 걸린다(랑데부
+    // 복귀 주기 2.4초 + 연속 3 SYNC 0.9초). 그동안 ESP32는 DATA를 전혀
+    // 못 받으므로 Gateway 입장에선 그냥 타임아웃이 연속으로 나는 걸로만
+    // 보인다. 재전송 한 번이 대략 150~300ms(슬롯 게이팅 + timeoutMs)라
+    // 5회로는 1초 남짓밖에 못 버텨서, ESP32가 복구되기 전에 Gateway가
+    // 먼저 포기해버린다.
+    //
+    // ESP32 쪽 재동기화 유예도 10초로 맞춰뒀으므로(firmware-esp32
+    // main/fsm.c OTA_FHSS_RESYNC_GRACE_MS), Gateway도 그 시간 동안은
+    // 버티도록 20회로 올린다. 진짜로 연결이 끊긴 경우엔 20회를 다 쓰고
+    // 실패하므로 무한 대기가 되지는 않는다.
+    // 상세: docs/note/design-notes-gateway-ota-es.md 56절.
+    const int maxRetry = (argc >= 13) ? std::atoi(argv[12]) : 20;
 
     std::cout << "[fhss_ota] device=" << devicePath << " file=" << binFile
                << " session_id=0x" << std::hex << sessionId
