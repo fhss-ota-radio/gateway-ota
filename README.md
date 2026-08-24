@@ -24,13 +24,28 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
 | 1 | Qt 프로젝트 세팅 및 화면 뼈대 | ✅ 완료 |
 | 2 | 전송 계층 추상화 + `Cc1101Transport` | ✅ 완료 (실기기 1067/1067) |
 | 3 | BIN 분할 + CRC | ✅ 완료 |
-| 4 | 핸드셰이크 + 송수신 + ACK | 🟡 `OtaSession`(배치 ACK+선택적 재전송) 구현·**실기기 검증 완료**(SHA256 무결성·NACK 실발신·전송효율 개선까지 포함, 2026-08-19) + `DISCOVER`/`DISCOVER_ACK` 기기 탐색 구현(2026-08-20) / **`otamanager.cpp`(화면) 연결은 아직** |
+| 4 | 핸드셰이크 + 송수신 + ACK | 🟡 `OtaSession`(배치 ACK+선택적 재전송) 구현·**실기기 검증 완료**(SHA256 무결성·NACK 실발신·전송효율 개선까지 포함, 2026-08-19) + `DISCOVER`/`DISCOVER_ACK` 기기 탐색 구현(2026-08-20) + **Qt 화면 연결 완료**(2026-08-20, `feature/qt-ui-integration`에서 진행돼 2026-08-23 병합) + **DISCOVER 화면 연동 완료**(2026-08-23, 유니캐스트도 이제 실동작) + **FHSS 화면 연동 완료**(2026-08-23, `feature/gateway-fhss-sync`에서 진행돼 병합 — Qt GUI 통합 4단계 전부 코드 작성 끝, 실기기 빌드 검증 남음) |
 | 5 | 실기기 통합 검증 | ✅ 완료 — 전송 + 재조립 무결성 검증 통과 |
 
 > **✅ (2026-08-22) Pi→ESP32 실통합 OTA 전송 검증 완료**: `test/esp32-integration`
 > 브랜치에서 라즈베리파이 → ESP32 7829청크 전송, SHA256 무결성 확인,
 > 실기기 부팅까지 확인. `develop` 머지 준비 완료 — 상세는
 > `docs/note/design-notes-gateway-ota-es.md` 31~39절.
+
+> **🔀 (2026-08-23) `feature/qt-ui-integration` 병합** — 공통 조상(`75990aa`)
+> 이후 갈라져 있던 Qt 화면 연동(Connect/OtaSession 연결, 레이아웃)을
+> 이 브랜치(FHSS 백엔드 수정 + PR#5 머지)에 합침. 겹치는 파일이 README뿐이라
+> 충돌 없이 깔끔하게 합쳐짐 — 상세는
+> `docs/note/design-notes-gateway-ota-es.md` 43절.
+
+> **🔀 (2026-08-23) `fix/fhss-ota-slot-safe` 병합** — 실기기로
+> firmware-esp32 `fhss-ota-sync-recovery` 브랜치와 맞춰 전송 성공까지
+> 확인된 브랜치. `SlotAwareTransport`(슬롯 경계를 확인한 뒤에만 DATA를
+> 보내는 `ITransport` 래퍼)로 "DATA가 커널 SYNC 전송과 충돌해 호핑이
+> 깨지는" 근본 문제(41~42절부터 미해결이던 것)를 해결함. 충돌 없이
+> 자동 병합됨. **CLI(`ota_smoke_fhss_ota_transfer`)만 이 래퍼를 씀 —
+> Qt 화면은 아직 연결 안 됨**(다음 작업 대상) — 상세는
+> `docs/note/design-notes-gateway-ota-es.md` 46~47절.
 
 > **무선 손실 약 0.75%는 재전송(마일스톤 4)으로 메워야 합니다.**
 > 재조립 로직은 바이트 단위로 정확함이 검증됐지만, 재전송이 없으면
@@ -142,7 +157,52 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
       `session/discovery.h/.cpp`의 `discoverDevices()`. `OtaSession`엔
       의도적으로 미포함(연결·화면 담당 상위 흐름, `docs/roadmap.md` 3절 참고).
       유닛테스트 5개 통과, **실기기(ESP32) 검증은 아직**
-- [ ] `otamanager.cpp`(화면)에 연결 — 미착수
+- [x] **`otamanager.cpp`(화면)에 연결 (2026-08-20, `feature/qt-ui-integration`에서
+      진행 후 2026-08-23 이 브랜치에 병합)** — `OtaSession`/`Cc1101Transport`를
+      실제로 생성·연결. `setOnStateChanged()` 콜백 하나로 진행률바·로그·버튼
+      상태 갱신, `QTimer`(10ms)로 `tick()` 주기 호출. **지금은 브로드캐스트
+      전송만 실제로 동작** — 로컬 파일 드라이버(`LocalFileTransport` 미구현)와
+      유니캐스트(특정 기기 지정, `targetCombo`가 아직 자리표시자라 실제
+      device_id 매핑 불가)는 의도적으로 막아둠, 화면에 안내 로그 표시.
+      호핑 난수(FHSS seed) 입력 UI도 같이 추가(연결(Transport) 카드) — 값
+      입력/저장만 되고 실제 파이·ESP32 연동은 아직. 자세한 설계 이유는
+      `docs/note/design-notes-gateway-ota-es.md` 32~33절. **Qt6 없는 샌드박스에서
+      작성해 실제 빌드 검증 필요**
+- [x] **(2026-08-23) `startRx()` 누락 버그 수정 + DISCOVER 연동** — 병합해온
+      Connect 코드가 `Cc1101Transport::open()`만 부르고 `startRx()`(수신 대기로
+      전환하는 별도 ioctl)를 안 불러서, 연결은 됐다고 뜨는데 DISCOVER_ACK나
+      ACK/NACK를 하나도 못 받는 상태였음 — CLI 도구들은 전부 이 호출이 있는데
+      화면 코드에만 빠져 있었음. `onConnectClicked()`에 추가해서 고침. 그
+      위에서 `discoverButton`(새 UI) → `onDiscoverClicked()` → `discoverDevices()`를
+      연동함. `discoverDevices()`가 blocking 호출이라(1000ms 대기) 그대로
+      GUI 스레드에서 부르면 창이 얼어붙어서 `QThread::create()`로 워커
+      스레드에서 돌리고 `QMetaObject::invokeMethod(..., Qt::QueuedConnection)`로
+      결과를 GUI 스레드에 돌려줌. 조회 결과는 `targetCombo`에 채워지고
+      (표시는 "AA-BB-CC (fw x.y.z)", 실제 `device_id`는 item data에 저장),
+      `onStartClicked()`가 이제 유니캐스트일 때 그 값을 그대로 씀 — **이제
+      유니캐스트 전송도 실제로 동작함(브로드캐스트 제한 해제)**. 워커
+      스레드와 GUI 스레드가 같은 `m_transport`를 동시에 건드리지 않도록
+      조회 중엔 연결 해제·전송 시작을 막음. Qt6 없는 샌드박스라 실제 빌드
+      검증 필요. 상세: `docs/note/design-notes-gateway-ota-es.md` 44절
+- [x] **(2026-08-23) FHSS 섹션 UI + rollout/hopping 연동** — `feature/gateway-fhss-sync`의
+      `session/fhssrollout.h`(`rolloutFhssConfig()`)와
+      `Cc1101Transport::configureFhss()/startFhss()/stopFhss()/getFhssStatus()`가
+      이 브랜치엔 없었음(PR#5 머지 시점 이후 브랜치에 쌓인 커밋 10개가
+      재병합 안 됨) — 먼저 병합한 뒤 착수. 새 "FHSS 호핑(실험적)" 카드에
+      채널 수/시작 채널/generation 입력 + 기존 호핑 seed 입력을 모아두고,
+      "FHSS 활성화" 버튼이 `targetCombo`에서 고른 기기 하나에
+      CONFIG→ACTIVATE→Gateway 커널 MASTER 호핑 시작까지 순서대로 실행함
+      (여러 기기 동시 호핑은 `rolloutFhssConfig()` 설계상 아직 미지원).
+      FHSS 핸드셰이크에 쓴 `session_id`를 이후 `OtaSession::start()`에도
+      재사용해서 "호핑 위에서 파일 전송"이 자연스럽게 이어짐
+      (`smoke_fhss_ota_transfer_main.cpp`와 같은 관례). RF 프로필(주파수/
+      싱크워드 등 무선 레벨 상수)은 팀 공용 값이라 화면 입력이 아니라
+      코드에 고정값으로 박아둠. `rolloutFhssConfig()`가 최악의 경우
+      수 초 걸리는 blocking 호출이라 DISCOVER와 같은 방식(`QThread` 워커 +
+      `QMetaObject::invokeMethod`)으로 처리. **이걸로 Qt GUI 통합
+      4단계(Connect/DISCOVER/Start-Pause/FHSS) 전부 코드 작성 완료** —
+      Qt6 없는 샌드박스라 실제 빌드/실기기 검증 필요. 상세:
+      `docs/note/design-notes-gateway-ota-es.md` 45절
 - [ ] **Pi → ESP32 실통합 OTA 전송 테스트 — 진행 중 (`test/esp32-integration`
       브랜치)**. 지금까지는 라즈베리파이끼리만 검증됐고, 실제 소비자(ESP32)가
       파일을 받아 적용하는 것은 아직 확인 전. 경위는

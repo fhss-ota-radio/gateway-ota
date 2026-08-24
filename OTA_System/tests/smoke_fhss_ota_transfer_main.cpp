@@ -1,0 +1,345 @@
+// 실기기(CC1101) 스모크테스트 — FHSS_CONFIG/ACTIVATE로 ESP32를 호핑에
+// 참여시키고, Gateway 자신도 커널 호핑(MASTER)을 켠 뒤, 그 위에서
+// OtaSession(FSM)으로 실제 펌웨어 파일을 전송하는 CLI.
+//
+// [왜 필요한가] ota_smoke_fhss_activate는 CONFIG->ACTIVATE->SYNC 관찰까지만
+// 하고 끝나는 도구였다(2026-08-23 실기기 검증 완료, design-notes-gateway-ota-es.md
+// 42절 5차 시도). OTA_START/DATA/END를 보내는 코드가 아예 없어서, "SYNC는 되는데
+// 파일 전송이 안 됨"은 버그가 아니라 그 도구가 원래 거기까지만 하도록 만들어진
+// 결과였다. 이 파일이 그 다음 단계 — 호핑 중인 채널 위에서 실제로
+// OtaSession::start()를 이어붙여서 파일을 보내는 통합 CLI다.
+//
+// [설계] 앞부분(CONFIG/ACTIVATE/커널 호핑 시작)은 smoke_fhss_activate_main.cpp와
+// 동일한 로직을 그대로 재사용한다(rolloutFhssConfig() + configureFhss() +
+// startFhss()). 그 다음 ESP32가 SYNC를 잡을 시간을 잠깐 기다린 뒤(SYNC_ACQUIRED까지
+// 보통 1~2초, 아래 kSyncSettleMs 참고), smoke_session_send_main.cpp와 동일한
+// 방식으로 OtaSession을 돌려서 파일을 보낸다. transport.send()/recv()는 현재
+// 호핑 중인 채널이 무엇이든 상관없이 그대로 동작한다 — 채널 전환은 커널
+// hop worker가 알아서 하고, 애플리케이션은 평소처럼 read/write만 하면 되는
+// 구조이기 때문이다(kernel-cc1101-spi README 설계 원칙).
+//
+// [session_id 재사용] FHSS_CONFIG/ACTIVATE에 쓴 session_id를 OtaSession::start()의
+// sessionId 인자로도 그대로 넘긴다 — 이 CLI 한 번 실행이 "하나의 세션"이라는
+// 개념을 일관되게 유지하기 위함(다르게 할 이유가 없고, 로그 추적도 더 쉬움).
+//
+// 사용법:
+//   ota_smoke_fhss_ota_transfer <device_path> <bin_file> <session_id_hex>
+//       <target_id_hex> <generation> [channel_count=8] [first_channel=1]
+//       [seed_hex=0] [batchSize=5] [chunkDelayMs=40] [timeoutMs=300] [maxRetry=5]
+//
+// 예: ota_smoke_fhss_ota_transfer /dev/cc1101 firmware.bin 0x1 A29E60 1 8 1 0x46485353
+
+#include "cc1101transport.h"
+#include "fhssrollout.h"
+#include "otasession.h"
+
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <iostream>
+#include <sstream>
+#include <string>
+#include <thread>
+#include <vector>
+
+namespace {
+
+// smoke_fhss_activate_main.cpp/smoke_session_send_main.cpp와 동일한 관례 —
+// base=16 명시(접두어 "0x" 있어도 없어도 둘 다 됨, 2026-08-22 hex 파싱 버그
+// 교훈 참고).
+bool parseHexU32(const std::string &text, uint32_t *out)
+{
+    if (text.empty())
+        return false;
+    try {
+        size_t consumed = 0;
+        const unsigned long value = std::stoul(text, &consumed, 16);
+        if (consumed != text.size())
+            return false;
+        *out = static_cast<uint32_t>(value);
+        return true;
+    } catch (const std::exception &) {
+        return false;
+    }
+}
+
+void printUsage(const char *argv0)
+{
+    std::cerr << "사용법: " << argv0
+              << " <device_path> <bin_file> <session_id_hex> <target_id_hex> "
+                 "<generation> [channel_count=8] [first_channel=1] [seed_hex=0] "
+                 "[batchSize=5] [chunkDelayMs=40] [timeoutMs=300] [maxRetry=5]\n"
+              << "  예: " << argv0
+              << " /dev/cc1101 firmware.bin 0x1 A29E60 1 8 1 0x46485353\n";
+}
+
+// FHSS_CONFIG/ACTIVATE 완료 후 커널 MASTER 호핑을 켜면, ESP32가 랑데부
+// 채널에서 SYNC를 찾아 SYNC_ACQUIRED까지 가는 데 보통 1~2초 걸린다(2026-08-23
+// 실기기 로그: 3개 SYNC 패킷 검증 후 SYNC_ACQUIRED, slot_duration_us=300000
+// 기준 약 0.9~1.2초). 그 전에 OTA_START를 보내면 ESP32가 아직 OTA_FHSS_READY가
+// 아니라서 응답이 없을 수 있으므로, 여유를 둬서 기다린다.
+constexpr int kSyncSettleMs = 2000;
+constexpr int kSlotPollMs = 2;
+constexpr int kPostSyncGuardMs = 25;
+constexpr int kSlotGateTimeoutMs = 1200;
+
+class SlotAwareTransport final : public ITransport
+{
+public:
+    SlotAwareTransport(Cc1101Transport &transport, uint32_t generation)
+        : m_transport(transport), m_generation(generation)
+    {
+    }
+
+    bool open() override { return m_transport.isOpen() || m_transport.open(); }
+    void close() override { m_transport.close(); }
+    bool isOpen() const override { return m_transport.isOpen(); }
+
+    bool send(const std::vector<uint8_t> &packet) override
+    {
+        const auto deadline = std::chrono::steady_clock::now()
+            + std::chrono::milliseconds(kSlotGateTimeoutMs);
+        auto status = m_transport.getFhssStatus();
+        if (!usable(status)) {
+            logGateFailure("initial status", status);
+            return false;
+        }
+
+        const uint64_t baselineSlot = status.currentSlot;
+        while (std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(kSlotPollMs));
+            status = m_transport.getFhssStatus();
+            if (!usable(status)) {
+                logGateFailure("status while waiting", status);
+                return false;
+            }
+            if (status.currentSlot == baselineSlot)
+                continue;
+
+            const uint64_t sendSlot = status.currentSlot;
+            std::this_thread::sleep_for(std::chrono::milliseconds(kPostSyncGuardMs));
+            const auto verified = m_transport.getFhssStatus();
+            if (!usable(verified) || verified.currentSlot != sendSlot)
+                continue;
+
+            const uint8_t type = packet.empty() ? 0 : packet.front();
+            std::cout << "[fhss_ota][slot_tx] type=" << static_cast<unsigned>(type)
+                      << " slot=" << sendSlot
+                      << " channel=" << static_cast<unsigned>(verified.currentChannel)
+                      << " post_sync_ms=" << kPostSyncGuardMs << "\n";
+            return m_transport.send(packet);
+        }
+
+        std::cerr << "[fhss_ota][slot_tx] safe slot timeout after "
+                  << kSlotGateTimeoutMs << "ms\n";
+        return false;
+    }
+
+    std::vector<uint8_t> recv() override { return m_transport.recv(); }
+
+private:
+    bool usable(const Cc1101FhssStatus &status) const
+    {
+        return status.enabled && status.synchronized &&
+               status.role == static_cast<uint8_t>(Cc1101FhssRole::Master) &&
+               status.generation == m_generation && status.lastError == 0;
+    }
+
+    static void logGateFailure(const char *where, const Cc1101FhssStatus &status)
+    {
+        std::cerr << "[fhss_ota][slot_tx] " << where
+                  << " enabled=" << status.enabled
+                  << " synchronized=" << status.synchronized
+                  << " role=" << static_cast<unsigned>(status.role)
+                  << " generation=" << status.generation
+                  << " slot=" << status.currentSlot
+                  << " error=" << status.lastError << "\n";
+    }
+
+    Cc1101Transport &m_transport;
+    uint32_t m_generation;
+};
+
+} // namespace
+
+int main(int argc, char *argv[])
+{
+    if (argc < 6) {
+        printUsage(argv[0]);
+        return 1;
+    }
+
+    const std::string devicePath = argv[1];
+    const std::string binFile = argv[2];
+
+    uint32_t sessionId = 0;
+    uint32_t targetDeviceId = 0;
+    uint32_t generation = 0;
+    if (!parseHexU32(argv[3], &sessionId)) {
+        std::cerr << "session_id_hex 파싱 실패: " << argv[3] << "\n";
+        return 1;
+    }
+    if (!parseHexU32(argv[4], &targetDeviceId)) {
+        std::cerr << "target_id_hex 파싱 실패: " << argv[4] << "\n";
+        return 1;
+    }
+    if (!parseHexU32(argv[5], &generation)) {
+        std::cerr << "generation 파싱 실패: " << argv[5] << "\n";
+        return 1;
+    }
+
+    const uint8_t channelCount = static_cast<uint8_t>(argc >= 7 ? std::strtoul(argv[6], nullptr, 0) : 8);
+    const uint8_t firstChannel = static_cast<uint8_t>(argc >= 8 ? std::strtoul(argv[7], nullptr, 0) : 1);
+    uint32_t seed = 0;
+    if (argc >= 9 && !parseHexU32(argv[8], &seed)) {
+        std::cerr << "seed_hex 파싱 실패: " << argv[8] << "\n";
+        return 1;
+    }
+    const int batchSize = (argc >= 10) ? std::atoi(argv[9]) : 5;
+    const int chunkDelayMs = (argc >= 11) ? std::atoi(argv[10]) : 40;
+    const int timeoutMs = (argc >= 12) ? std::atoi(argv[11]) : 300;
+    const int maxRetry = (argc >= 13) ? std::atoi(argv[12]) : 5;
+
+    std::cout << "[fhss_ota] device=" << devicePath << " file=" << binFile
+               << " session_id=0x" << std::hex << sessionId
+               << " target=0x" << targetDeviceId << std::dec
+               << " generation=" << generation
+               << " channel_count=" << static_cast<int>(channelCount)
+               << " first_channel=" << static_cast<int>(firstChannel) << "\n";
+    std::cout << "[fhss_ota] (대상 ESP32가 MENU_OTA/STANDBY 상태여야 합니다)\n";
+
+    Cc1101Transport transport(devicePath);
+    if (!transport.open()) {
+        std::cerr << "[fhss_ota] transport open 실패: " << devicePath << "\n";
+        return 1;
+    }
+
+    // [1단계] 이전 실행의 호핑 잔존을 정리 — ota_smoke_fhss_activate와 동일한
+    // 이유(design-notes 42절 2~4차 시도 참고). 이번 CLI는 곧바로 다시
+    // 호핑을 켤 것이므로 실질적 영향은 크지 않지만, 시작 시점을 항상 같은
+    // 상태로 맞추는 관례를 그대로 따른다.
+    (void)transport.stopFhss();
+    if (transport.setChannel(0) != Cc1101Status::Ok)
+        std::cerr << "[fhss_ota] setChannel(0) 실패 — 그래도 계속 진행\n";
+    if (transport.startRx() != Cc1101Status::Ok)
+        std::cerr << "[fhss_ota] startRx 실패 — 그래도 계속 진행\n";
+
+    FhssHopPolicy policy;
+    policy.generation = generation;
+    policy.algorithmVersion = 1; // OTA_FHSS_ALGORITHM_VERSION
+    policy.channelProfileId = 0;
+    policy.firstChannel = firstChannel;
+    policy.rendezvousChannel = firstChannel;
+    policy.channelCount = channelCount;
+    policy.reservedChannel = 0;
+    policy.seed = seed;
+    policy.slotDurationUs = 300000;
+    policy.channelSwitchGuardUs = 5000;
+
+    std::cout << "[fhss_ota] 1~2단계: FHSS_CONFIG -> FHSS_ACTIVATE 배포...\n";
+    const auto onRolloutLog = [](const std::string &msg) {
+        std::cout << "[fhss_ota][rollout] " << msg << "\n";
+    };
+    const auto outcomes = rolloutFhssConfig(transport, sessionId, {targetDeviceId}, policy,
+                                             timeoutMs, maxRetry, onRolloutLog);
+    if (outcomes.empty() || outcomes.front().stage != FhssRolloutStage::Activated) {
+        std::cerr << "[fhss_ota] FHSS 활성화 실패 — 파일 전송을 시작하지 않습니다.\n";
+        transport.close();
+        return 1;
+    }
+    std::cout << "[fhss_ota] FHSS 활성화 성공. Gateway 커널 호핑(MASTER) 시작...\n";
+
+    // [RF 프로필 — smoke_fhss_activate_main.cpp와 동일값, 2026-08-22 실기기로
+    // sync_word=0xD391/base_freq_hz=433919830/channel_spacing_hz=199951 확정됨]
+    Cc1101FhssConfig kernelConfig;
+    kernelConfig.generation = generation;
+    kernelConfig.algorithmId = 1; // CC1101_FHSS_ALGORITHM_SEEDED_PERMUTATION
+    kernelConfig.rfBaseFreqHz = 433919830u;
+    kernelConfig.rfChannelSpacingHz = 199951u;
+    kernelConfig.rfSyncWord = 0xD391u;
+    kernelConfig.rfMdmcfg4 = 0xCA;
+    kernelConfig.rfMdmcfg3 = 0x83;
+    kernelConfig.rfPktctrl1 = 0x04;
+    kernelConfig.rfPktctrl0 = 0x05;
+    kernelConfig.seed = policy.seed;
+    kernelConfig.slotDurationUs = policy.slotDurationUs;
+    kernelConfig.channelSwitchGuardUs = policy.channelSwitchGuardUs;
+    kernelConfig.channelCount = policy.channelCount;
+    kernelConfig.firstChannel = policy.firstChannel;
+    kernelConfig.rendezvousChannel = policy.rendezvousChannel;
+    kernelConfig.reservedChannel = policy.reservedChannel;
+    kernelConfig.algorithmVersion = policy.algorithmVersion;
+    kernelConfig.channelProfileId = policy.channelProfileId;
+
+    if (transport.configureFhss(kernelConfig) != Cc1101Status::Ok) {
+        std::cerr << "[fhss_ota] configureFhss 실패\n";
+        transport.close();
+        return 1;
+    }
+    if (transport.startFhss(Cc1101FhssRole::Master) != Cc1101Status::Ok) {
+        std::cerr << "[fhss_ota] startFhss(MASTER) 실패\n";
+        transport.close();
+        return 1;
+    }
+
+    std::cout << "[fhss_ota] 3단계: ESP32가 SYNC_ACQUIRED까지 갈 시간(" << kSyncSettleMs
+               << "ms) 대기...\n";
+    std::this_thread::sleep_for(std::chrono::milliseconds(kSyncSettleMs));
+    {
+        const auto status = transport.getFhssStatus();
+        std::cout << "[fhss_ota] 호핑 상태: enabled=" << status.enabled
+                   << " synchronized=" << status.synchronized
+                   << " channel=" << static_cast<int>(status.currentChannel) << "\n";
+    }
+
+    // [4단계] 호핑 중인 채널 위에서 OtaSession으로 실제 파일 전송.
+    // smoke_session_send_main.cpp와 동일한 사용법 — transport.send()/recv()는
+    // 지금이 어느 채널이든 그대로 동작한다(커널이 채널 전환을 알아서 함).
+    std::cout << "[fhss_ota] 4단계: OtaSession으로 파일 전송 시작...\n";
+    SlotAwareTransport slotAwareTransport(transport, generation);
+    if (chunkDelayMs != 0) {
+        std::cout << "[fhss_ota] slot-aware TX가 패킷 간격을 소유하므로 chunkDelayMs="
+                  << chunkDelayMs << "는 사용하지 않습니다.\n";
+    }
+    OtaSession session(slotAwareTransport, batchSize, timeoutMs, maxRetry,
+                       /*chunkDelayMs=*/0);
+    session.setOnStateChanged([](OtaSessionState s) {
+        std::cout << "[fhss_ota] 상태 -> " << otaSessionStateName(s) << "\n";
+    });
+    session.setOnLog([](const std::string &msg) {
+        std::cout << "[fhss_ota][log] " << msg << "\n";
+    });
+
+    if (!session.start(binFile, targetDeviceId, sessionId)) {
+        std::cerr << "[fhss_ota] session.start() 실패: " << session.errorMessage() << "\n";
+        transport.close();
+        return 1;
+    }
+
+    uint32_t lastAcked = 0;
+    while (session.state() != OtaSessionState::Completed
+           && session.state() != OtaSessionState::Failed) {
+        session.tick(otaSessionNowMs());
+
+        const auto progress = session.progress();
+        if (progress.ackedChunks != lastAcked) {
+            std::cout << "[fhss_ota] 진행 " << progress.ackedChunks << "/"
+                       << progress.totalChunks << " (배치 " << progress.currentBatchNumber << "/"
+                       << progress.totalBatches << ")\n";
+            lastAcked = progress.ackedChunks;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    transport.close();
+
+    if (session.state() == OtaSessionState::Completed) {
+        std::cout << "[fhss_ota] 완료 — 호핑 중 파일 전송 성공, 전체 "
+                   << session.progress().totalChunks << "청크 배치 ACK까지 확인됨\n";
+        return 0;
+    }
+
+    std::cerr << "[fhss_ota] 실패: " << session.errorMessage() << "\n";
+    return 1;
+}

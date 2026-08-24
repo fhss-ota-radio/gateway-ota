@@ -60,6 +60,8 @@ add_library(ota_core STATIC
     session/otasession.cpp
     session/discovery.h
     session/discovery.cpp
+    session/fhssrollout.h
+    session/fhssrollout.cpp
     transport/itransport.h
     transport/cc1101_status.h
     transport/cc1101transport.h
@@ -154,6 +156,20 @@ target_link_libraries(ota_discovery_tests
 )
 add_test(NAME ota_discovery_tests COMMAND ota_discovery_tests)
 
+# ---------- ota_fhssrollout_tests: rolloutFhssConfig()(FHSS_CONFIG/ACTIVATE) 검증 ----------
+# 2026-08-22 착수. FakeTransport(인메모리)로 실기기 없이 성공/무응답 재시도
+# 실패/부분 실패(기기 여러 대 중 하나만 실패)/NACK 재시도 시나리오를 검증 —
+# ota_discovery_tests와 같은 패턴. 배경: docs/note/design-notes-gateway-ota-es.md
+# (gateway-ota 담당 FHSS 항목, firmware-esp32 develop 725b27d 대응).
+add_executable(ota_fhssrollout_tests
+    tests/tst_fhssrollout.cpp
+)
+target_link_libraries(ota_fhssrollout_tests
+    PRIVATE
+        ota_core
+)
+add_test(NAME ota_fhssrollout_tests COMMAND ota_fhssrollout_tests)
+
 # ---------- ota_smoke_send / ota_smoke_recv: 실기기(CC1101) 스모크테스트용 CLI ----------
 # /dev/cc1101이 실제로 있어야 동작하는 수동 실행 도구라서 add_test()에는 등록하지
 # 않음 — ctest(자동 빌드 검증)에는 안 끼고, 실기기 앞에서 사람이 직접 실행.
@@ -215,6 +231,30 @@ add_executable(ota_smoke_discover_session_send
     tests/smoke_discover_session_send_main.cpp
 )
 target_link_libraries(ota_smoke_discover_session_send
+    PRIVATE
+        ota_core
+)
+
+# rolloutFhssConfig()(session/fhssrollout.h)로 실제 ESP32에 FHSS 설정을
+# 배포·활성화하고, Gateway 자신도 커널 호핑(MASTER)을 켜서 동기화 상태를
+# 지켜보는 CLI — 2026-08-22. RF 프로필 기본값에 대한 주의는
+# smoke_fhss_activate_main.cpp 상단 주석 참고(팀 재확인 필요한 추정치).
+add_executable(ota_smoke_fhss_activate
+    tests/smoke_fhss_activate_main.cpp
+)
+target_link_libraries(ota_smoke_fhss_activate
+    PRIVATE
+        ota_core
+)
+
+# CONFIG/ACTIVATE/커널 호핑 시작까지는 ota_smoke_fhss_activate와 동일하게 하고,
+# 그 위에서 OtaSession으로 실제 파일 전송까지 이어붙이는 CLI — 2026-08-23.
+# ota_smoke_fhss_activate가 SYNC 관찰까지만 하고 끝나는 도구라는 게 확인된 뒤
+# (design-notes-gateway-ota-es.md 42절 5차 시도), 그 다음 단계로 추가함.
+add_executable(ota_smoke_fhss_ota_transfer
+    tests/smoke_fhss_ota_transfer_main.cpp
+)
+target_link_libraries(ota_smoke_fhss_ota_transfer
     PRIVATE
         ota_core
 )
