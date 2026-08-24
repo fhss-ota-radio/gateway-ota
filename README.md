@@ -272,6 +272,8 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
 | [`docs/roadmap.md`](docs/roadmap.md) | 현재 진행 상황·다음 할 일 |
 | [`docs/file-transfer-guide.md`](docs/file-transfer-guide.md) | 파일 전송이 코드 안에서 어떻게 도는지 |
 | [`docs/testing-spidev-transport.md`](docs/testing-spidev-transport.md) | 진단 경로 빌드/실행법 |
+| [`docs/fhss-hopping-guide.md`](docs/fhss-hopping-guide.md) | **FHSS(주파수 도약) 호핑이 어떻게 동작하는지** — CONFIG/ACTIVATE 배포부터 채널 순서 알고리즘·SYNC 상태 머신까지 |
+| [`docs/troubleshooting-fhss-hopping.md`](docs/troubleshooting-fhss-hopping.md) | **FHSS 호핑이 안 될 때** — 싱크워드 불일치·ESP32 메뉴 상태 등 증상별 |
 | `kernel-cc1101-spi/docs/troubleshooting-cc1101.md` | **CC1101이 안 될 때** |
 | `kernel-cc1101-spi/docs/driver-changes-handoff-2026-08-17.md` | 커널 드라이버 변경 내역 (담당자용) |
 
