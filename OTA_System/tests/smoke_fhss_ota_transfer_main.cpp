@@ -115,6 +115,33 @@ constexpr int kSlotGateTimeoutMs = 1200;
 // 아니라 "합리적인 추정치"라서, 첫 실기기 테스트 로그(각 전송이 안전
 // 창의 몇 ms 지점에서 나갔는지)를 보고 좁혀나갈 것.
 constexpr int kTailGuardMs = 40;
+// [2026-08-24 추가] 같은 슬롯 안에서 연속으로 보낼 때 패킷 사이에 최소한
+// 이만큼은 띄운다.
+//
+// [왜 필요한가] CC1101은 반이중(half-duplex — 송신과 수신을 동시에 못 하는
+// 방식) 트랜시버 하나뿐이라, ESP32가 ACK를 송신하는 동안은 귀가 닫혀 있다.
+// 148 실기기 로그(2026-08-24, ESP32 fe7f96c)로 이 왕복 시간을 실측했다:
+//
+//   23185  RX DATA(seq=0)        DATA 도착
+//   23234  DATA accepted seq=0
+//   23248  TX ACK seq=0
+//   23306  TX_RESULT ch=1        ACK 송신 완료 -> 왕복 약 121ms
+//   23337  batch store seq=2, received=0x05   <- seq=1은 아예 못 받음
+//   23403  TX_RESULT (seq=2 ACK)
+//   23449  batch store seq=4, received=0x15   <- seq=3도 못 받음
+//
+// 위 실행에서 Gateway는 슬롯 하나에 5개를 16ms 간격으로 쐈는데(안전창
+// 재사용 최적화의 부작용), ESP32의 왕복이 121ms라서 ACK 송신 중에 지나간
+// 홀수 seq가 통째로 유실됐다 — missing_mask가 0x1A(=seq 1,3,4)로 고정되고
+// 재전송 한도를 넘겨 실패. "패킷을 촘촘히 보낼수록 오히려 덜 도착하는"
+// 상태였던 것.
+//
+// 실측 121ms에 여유를 얹어 150ms로 둔다. 안전창(슬롯 300ms -
+// kPostSyncGuardMs 25 - kTailGuardMs 40 = 235ms) 안에서는 슬롯당 2개가
+// 나가고, 나머지는 다음 슬롯 창으로 자연히 밀린다(batchSize와 무관하게
+// 동작 — 창이 닫히면 ensureSafeWindow()가 다음 슬롯을 기다림).
+// 상세: docs/note/design-notes-gateway-ota-es.md 55절.
+constexpr int kMinPacketGapMs = 150;
 
 class SlotAwareTransport final : public ITransport
 {
@@ -149,6 +176,8 @@ public:
             // 실패했으면 이 창을 더 이상 못 믿음(예: 그 사이 동기화가
             // 깨졌을 수도 있음) — 다음 send() 호출은 처음부터 다시 게이팅.
             m_openWindowSlot = kNoWindow;
+        } else {
+            m_lastSentAt = std::chrono::steady_clock::now();
         }
         return ok;
     }
@@ -185,6 +214,25 @@ private:
     // 기다렸다가 새 창을 연다.
     bool ensureSafeWindow()
     {
+        // [2026-08-24 추가] 반이중 왕복 보호 — 직전 전송 이후
+        // kMinPacketGapMs가 안 지났으면 그만큼 기다린다. ESP32가 직전
+        // DATA의 ACK를 송신하는 동안은 수신을 못 하므로, 이걸 안 지키면
+        // 그 사이에 보낸 패킷이 통째로 유실된다(상단 kMinPacketGapMs
+        // 주석의 실측 로그 참고). 창이 살아있는 경로/새 창을 여는 경로
+        // 둘 다에 적용돼야 하므로 함수 맨 앞에 둔다 — 새 창을 여는
+        // 경로는 어차피 슬롯 경계까지 기다리느라 이 간격이 자연히
+        // 확보되지만, 명시적으로 보장해두는 편이 안전하다.
+        if (m_lastSentAt.time_since_epoch().count() != 0) {
+            for (;;) {
+                const int64_t sinceLastMs =
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - m_lastSentAt).count();
+                if (sinceLastMs >= kMinPacketGapMs)
+                    break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(kSlotPollMs));
+            }
+        }
+
         if (m_openWindowSlot != kNoWindow) {
             const auto status = m_transport.getFhssStatus();
             const int64_t elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -245,6 +293,9 @@ private:
     int64_t m_slotDurationMs;
     uint64_t m_openWindowSlot = kNoWindow;
     std::chrono::steady_clock::time_point m_windowOpenedAt{};
+    // 기본 생성된 time_point는 epoch(=count() 0)이므로, "아직 한 번도 안
+    // 보냄"을 별도 bool 없이 이걸로 구분한다(ensureSafeWindow() 참고).
+    std::chrono::steady_clock::time_point m_lastSentAt{};
 };
 
 } // namespace
