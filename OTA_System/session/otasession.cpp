@@ -219,6 +219,18 @@ void OtaSession::tickHandshaking(int64_t nowMs)
 
     if (packet.kind == ReceivedPacketKind::Ack && matchesOurStart) {
         log("START ACK 수신 (session_id=0x" + toHex(m_sessionId) + ") -> 배치 전송 시작");
+        // 하드웨어 FLUSH_RX ioctl은 새 드라이버에서 이후 poll/read 통지를
+        // 끊어 ACK가 RF로 도착해도 userspace가 못 읽게 했다. 수신 상태는
+        // 건드리지 않고, START ACK 전에 누적된 응답만 bounded drain한다.
+        constexpr int kMaxPreDataDrain = 64;
+        int drained = 0;
+        for (; drained < kMaxPreDataDrain; ++drained) {
+            const auto stale = m_transport.recv();
+            if (stale.empty())
+                break;
+        }
+        log("START ACK 이후 pre-DATA stale RX userspace drain="
+            + std::to_string(drained));
         enterSendingBatch(nowMs);
         return;
     }
