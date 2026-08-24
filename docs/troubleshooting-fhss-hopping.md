@@ -24,17 +24,28 @@ FHSS 흐름은 두 단계로 나뉩니다.
 MENU_OTA -> OTA_FHSS_CONFIGURED   ← 1단계 성공 (CONFIG ACK)
 OTA_FHSS_CONFIGURED -> OTA_FHSS_SYNCING   ← 1단계 완전 성공 (ACTIVATE ACK)
 OTA_FHSS_SYNCING -> OTA_FHSS_READY   ← 2단계 성공 (SYNC 획득)
-OTA_FHSS_SYNCING -> MENU_OTA (5초 후)   ← 2단계 실패 (SYNC 타임아웃) — 1장
+OTA_FHSS_READY -> OTA_RECEIVING      ← 3단계 진입 (OTA_START 수신)
+OTA_FHSS_SYNCING -> MENU_OTA         ← 2단계 실패 (SYNC 타임아웃) — 1장 또는 4장
 ```
 
 | 증상 | 막힌 단계 | 참고 장 |
 |---|---|---|
 | CONFIG/ACTIVATE 자체가 완전 무응답 (Gateway 쪽 로그에 ACK 한 번도 안 찍힘) | 1단계 진입도 못 함 | 2장 |
-| CONFIG/ACTIVATE는 성공, `OTA_FHSS_SYNCING`에서 5초 뒤 `MENU_OTA`로 복귀 | 2단계 실패 | 1장 |
+| CONFIG/ACTIVATE는 성공, `OTA_FHSS_SYNCING`에서 타임아웃 — **SYNC 패킷이 하나도 안 보임** | 2단계 실패 (싱크워드) | 1장 |
+| CONFIG/ACTIVATE는 성공, `OTA_FHSS_SYNCING`에서 타임아웃 — **SYNC는 보이는데 획득을 못 함** | 2단계 실패 (타이밍 교착) | 4장 |
+| `OTA_FHSS_READY`까지는 갔는데 DATA의 ACK가 유실됨 | 3단계 실패 | 3장 |
+| `OTA_RECEIVING`까지 갔는데 배치의 **절반만** 도착 (누락 seq가 규칙적) | 3단계 실패 (반이중) | 5장 |
+
+> 1장과 4장은 FSM 전이만 보면 똑같습니다. **ESP32 로그에 `SYNC RX:`
+> 줄이 찍히는지**로 갈라내세요 — 안 찍히면 1장(싱크워드가 달라 하드웨어
+> 필터에서 걸러짐), 찍히는데 `state=SEARCHING`에서 못 벗어나면 4장입니다.
 
 ---
 
-## 1. 핸드셰이크는 성공, SYNC가 5초 안에 안 잡힘 — 싱크워드 불일치
+## 1. 핸드셰이크는 성공, SYNC 패킷이 아예 안 보임 — 싱크워드 불일치
+
+> **먼저 4장과 구분하세요.** 이 장은 ESP32 로그에 `SYNC RX:` 줄이
+> **한 번도 안 찍히는** 경우입니다. 찍히는데 획득만 못 하면 4장입니다.
 
 ### 증상
 
@@ -47,7 +58,7 @@ OTA_FHSS_SYNCING -> MENU_OTA (5초 후)   ← 2단계 실패 (SYNC 타임아웃)
 fsm: MENU_OTA -> OTA_FHSS_CONFIGURED
 fsm: OTA_FHSS_CONFIGURED -> OTA_FHSS_SYNCING
 fhss_service: channel selected: slot=0 channel=1   (SYNC 기다리는 중, 계속 channel=1 고정)
-... (5초 경과)
+... (타임아웃까지 경과 — `SYNC RX:` 줄이 단 한 번도 안 찍힘)
 fsm: OTA_FHSS_SYNCING -> MENU_OTA      ← SYNC 타임아웃, 되돌아감
 ```
 
@@ -232,14 +243,19 @@ ESP32 혼자서 자신의 홉 타이머보다 처리가 늦어지는 문제이�
 2026-08-24 실기기 테스트에서 batchSize=1(패킷 하나만 보내고 ACK
 기다림)로도 동일하게 재현됨을 확인했습니다.
 
-### 제안하는 수정 방향 (ESP32 쪽, 담당자 확인 필요)
+### 해결 (2026-08-24, `firmware-esp32` `dda9572`에서 수정 완료)
 
-1. `RECEIVE_RESULT_RADIO_ERROR`를 "진짜 무선 오류"(`rf_transport_start_receive`
-   실패)와 "본문 읽기 타임아웃"(`rf_transport_receive_packet` 타임아웃)으로
-   분리 — 후자는 TIMEOUT/CRC_FAIL처럼 드레인을 계속하도록 완화.
-2. DATA 수신 → ACK 송신 경로를 홉 스케줄러의 채널 전환보다 우선순위를
-   높게 처리하거나, ACK 송신이 슬롯 경계를 넘기지 않도록 별도의
-   짧은 데드라인을 두는 방안.
+`RECEIVE_RESULT_RADIO_ERROR`를 두 가지로 분리했습니다.
+
+- `rf_transport_start_receive()` 실패 — 진짜 하드웨어 오류. 기존대로
+  `report_event(FHSS_SERVICE_EVENT_ERROR)`.
+- `rf_transport_receive_packet()` 본문 타임아웃 — 새 값
+  `RECEIVE_RESULT_BODY_TIMEOUT`. TIMEOUT/CRC_FAIL과 동일하게 취급해
+  드레인을 계속하고, tracking 중이면 `handle_miss()`만 호출.
+
+수정 후 실기기 로그에서 `drain stopped` / `RADIO_ERROR` 문자열이 **한
+번도 안 나타나는 것**으로 이 경로가 막힌 걸 확인했습니다. 다만 이걸
+고쳐도 전송은 여전히 실패했는데, 원인이 4장/5장으로 옮겨간 것이었습니다.
 
 ### 관련 로그 전문
 
@@ -248,13 +264,200 @@ CLI로 재현. 실기기: Pi 149 + ESP32(A2-9E-60). 2026-08-24.
 
 ---
 
-## 4. 참고
+## 4. `OTA_FHSS_SYNCING`에서 타임아웃 — 동기화 전에 DATA를 쏴서 동기화가 막힘
+
+### 증상
+
+3장과 달리 **아예 `OTA_FHSS_READY`로 못 넘어가고** `OTA_FHSS_SYNCING`에서
+타임아웃으로 `MENU_OTA`로 되돌아갑니다. 1장(싱크워드 불일치)과 증상이
+같아 보이지만, **SYNC 패킷 자체는 정상적으로 수신되고 있다**는 점이
+다릅니다.
+
+```
+36671  fsm: OTA_FHSS_CONFIGURED -> OTA_FHSS_SYNCING   (slot=0, channel=1 고정)
+36719~38723  channel selected: slot=0 channel=1 x6    2.4초간 SYNC 전무
+39083  SYNC RX: state=SEARCHING slot=8 channel=1       첫 SYNC (2.4초 걸림)
+39109  RX START(1)                                     26ms 뒤 Gateway가 벌써 START
+39319  RX DATA(2) ...                                  DATA 폭주 시작
+39358  channel selected: slot=9 channel=7              호핑 추종 시작
+40041  channel selected: slot=0 channel=1              ★ 랑데부로 리셋 = SEARCHING 복귀
+41483  SYNC RX: state=SEARCHING slot=16                 처음부터 다시
+41711  fsm: OTA_FHSS_SYNCING -> MENU_OTA                ★ 타임아웃, 세션 폐기
+41783  SYNC RX: state=SYNCHRONIZING                     DATA 멈추자마자
+42083  SYNC RX: state=SYNCHRONIZING
+42095  SYNC_ACQUIRED                                    400ms만 더 버텼으면 성공
+```
+
+**결정적 단서**: 세션이 폐기되어 DATA가 멈추자마자 300ms 만에 깨끗이
+동기화가 됩니다. "DATA 폭주가 동기화를 방해하고 있었다"는 증거입니다.
+
+### 원인 — 두 코드의 타이밍 가정이 안 맞음
+
+1. ESP32는 ACTIVATE 직후 **랑데부 채널(보통 1번)에 고정**된 채 SYNC를
+   기다립니다. 그런데 Gateway는 이미 8채널을 순회 중이라 1번으로 돌아오는
+   건 **8슬롯마다 = 300ms × 8 = 2.4초에 한 번**뿐입니다.
+2. 획득하려면 SYNC를 **연속 3개** 받아야 합니다
+   (SEARCHING → SYNCHRONIZING ×2 → 획득) → +0.9초. **최악 합계 3.3초.**
+3. 그런데 Gateway는 `kSyncSettleMs = 2000` — **2초만 기다리고** START/DATA를
+   쐈습니다. 위 로그에선 ESP32의 첫 SYNC(2.4초)보다도 먼저 도착했습니다.
+4. **치명타**: DATA를 처리하느라 다음 SYNC를 놓치면, ESP32는 아직 획득
+   전(SYNCHRONIZING)이라 관용 없이 기준점을 통째로 버리고 랑데부로
+   되돌아갑니다(`fhss_service.c` `handle_miss()`의 `was_synchronizing`
+   분기 → `fhss_slot_scheduler_clear_reference()`). → 또 2.4초 대기 →
+   그 사이 DATA는 계속 옴 → 반복 → 영영 TRACKING 못 감.
+5. ESP32의 동기화 타임아웃이 먼저 터져 세션 폐기.
+
+요약하면 **"ESP32가 동기화하기 전에 Gateway가 데이터를 퍼붓고, 그 데이터
+때문에 ESP32가 동기화를 못 하는"** 구조적 교착입니다.
+
+### 해결 (2026-08-24, 양쪽 동시 수정)
+
+두 값은 **Gateway 대기 < ESP32 타임아웃** 관계로 맞물려 있어서 한쪽만
+바꾸면 안 됩니다.
+
+| 파일 | 상수 | 변경 | 이유 |
+|---|---|---|---|
+| `gateway-ota` `smoke_fhss_ota_transfer_main.cpp` | `kSyncSettleMs` | 2000 → **4000** | 최악 3.3초 + 여유. 근본 원인(동기화 전 DATA 송신)을 직접 막음 |
+| `firmware-esp32` `main/fsm.c` | `OTA_FHSS_SYNC_TIMEOUT_MS` | 5000 → **10000** | 5초는 정상 경로에도 여유가 1.7초뿐. 지터 흡수용 안전망 |
+
+기존 주석의 "SYNC_ACQUIRED까지 1~2초"는 **첫 SYNC를 이미 잡은 뒤부터**
+재는 시간이었고, 그 앞의 "첫 SYNC를 잡기까지"(최악 2.4초)를 빠뜨린 것이
+오류였습니다.
+
+**검증**: 수정 후 FSM이 처음으로
+`OTA_FHSS_SYNCING → OTA_FHSS_READY → OTA_RECEIVING`까지 정상 진행하고
+`OTA progress: 0%`까지 찍혔습니다.
+
+---
+
+## 5. 동기화·핸드셰이크 다 성공했는데 배치의 절반만 도착 — 반이중 왕복 시간 무시
+
+### 증상
+
+4장까지 다 통과해서 `OTA_RECEIVING`까지 갔는데도 배치 재전송 한도를
+넘겨 실패합니다. 특징은 **누락되는 seq가 규칙적**이라는 점입니다.
+
+```
+Gateway: window_elapsed_ms=0, 16, 32, 48, 65    (한 슬롯에 5개를 16ms 간격으로)
+
+ESP32:
+  23185  RX DATA(seq=0)
+  23234  DATA accepted seq=0
+  23248  TX ACK seq=0
+  23306  TX_RESULT ch=1                      ACK 송신 완료 → 왕복 121ms
+  23337  batch store seq=2, received=0x05    ★ seq=1은 아예 못 받음
+  23403  TX_RESULT (seq=2 ACK)
+  23449  batch store seq=4, received=0x15    ★ seq=3도 못 받음
+```
+
+`missing_mask`가 `0x1A`(seq 1,3,4)에 고정된 채 재전송만 반복합니다.
+
+### 원인 — CC1101은 반이중, ACK 송신 중엔 귀가 닫힘
+
+CC1101은 **반이중(half-duplex — 송신과 수신을 동시에 못 하는 방식)**
+트랜시버 하나뿐입니다. ESP32가 ACK를 송신하는 동안은 수신을 못 합니다.
+
+- ESP32의 DATA → ACK 왕복 실측: **121ms**
+- Gateway가 보낸 간격: **16ms**
+
+그래서 seq=0의 ACK를 보내는 사이 seq=1이 지나가고, seq=2의 ACK를 보내는
+사이 seq=3이 지나갑니다. **패킷을 촘촘히 보낼수록 오히려 덜 도착하는**
+상태였습니다.
+
+"슬롯당 여러 패킷" 최적화가 슬롯 경계만 신경 쓰고 **수신 측의 처리 왕복
+시간**이라는 제약을 아예 고려하지 않은 것이 원인입니다.
+
+### 해결 (2026-08-24, Gateway 쪽만 수정)
+
+`SlotAwareTransport::ensureSafeWindow()` 맨 앞에서, 직전 전송 이후
+`kMinPacketGapMs = 150`(실측 121ms + 여유)이 지날 때까지 대기하도록
+했습니다. 창 재사용 경로와 새 창 경로 양쪽에 다 적용됩니다.
+
+### 슬롯당 몇 개가 나가는가
+
+| 항목 | 값 |
+|---|---|
+| 슬롯 길이 | 300ms |
+| 앞 가드 `kPostSyncGuardMs` | 25ms |
+| 뒤 가드 `kTailGuardMs` | 40ms |
+| **사용 가능한 안전창** | **235ms** (300 − 25 − 40) |
+| 최소 간격 `kMinPacketGapMs` | 150ms |
+
+전송 가능한 시점은 `0ms`, `150ms` 두 번. 세 번째는 `300ms`가 되어
+안전창도 슬롯도 넘으므로 다음 슬롯으로 밀립니다.
+
+→ **슬롯당 2개.** 가드를 아무리 줄여도 `300 ÷ 150 = 2`라서 **구조적
+상한**입니다. 처리량은 초당 약 6.7개, 7949청크 기준 약 20분(이론값).
+
+### 더 빠르게 하려면 — 배치 단위 ACK (다음 과제)
+
+상한 2개를 만드는 건 **"DATA 하나당 ACK 하나"**라는 응답 방식 자체입니다.
+ESP32가 **배치 종료 시점(또는 배치 타임아웃)에 한 번만** 응답하도록
+바꾸면 버스트 내내 수신 상태를 유지할 수 있어 간격 제약이 사라집니다.
+
+구조적으로는 이미 가능합니다.
+
+- 프로토콜에 `missing_mask` 기반 배치 개념이 이미 있음
+  (`batch store: base=0, seq=2, received=0x05, missing=0x1A`)
+- ESP32에 배치 타임아웃 시 누락분만 골라 NACK를 보내는 경로가 이미 있음
+  (`RX timeout: ... missing_mask=0x1A` → `TX NACK ... seq=1/3/4`)
+
+즉 "DATA마다 즉시 보내는 개별 ACK"만 없애고 배치 종료 시점의 집계
+응답에 맡기면 됩니다. Gateway `OtaSession`도 개별 ACK 대신 배치 응답
+하나를 기다리도록 맞춰야 합니다.
+
+**단, 전송 완주가 확인되기 전에는 손대지 마세요** — 실패했을 때 원인이
+어느 쪽인지 다시 갈라내야 합니다.
+
+---
+
+## 6. 같은 증상, 다른 원인 — 오늘 겪은 네 겹
+
+`FAIL: 배치 재전송 한도(5회) 초과`라는 **동일한 증상** 하나 뒤에 서로
+다른 계층의 원인이 네 개 겹쳐 있었습니다. 하나를 벗겨야 다음 게
+드러나는 구조였으므로, 비슷한 증상을 만나면 이 순서로 의심하세요.
+
+| # | 계층 | 원인 | 장 |
+|---|---|---|---|
+| 1 | 커널 드라이버 | 모듈이 레지스터를 안 써서 무선 통신 자체가 안 됨 | `kernel-cc1101-spi` 쪽 문서 |
+| 2 | ESP32 슬롯 로직 | 본문 타임아웃을 무선 오류로 오분류 → ACK가 다음 홉 채널로 | 3장 |
+| 3 | 동기화 타이밍 | 동기화 전에 DATA를 쏘고, 그 DATA가 동기화를 막는 교착 | 4장 |
+| 4 | 반이중 제약 | 수신 측 ACK 왕복(121ms) 무시하고 16ms 간격 전송 | 5장 |
+
+**교훈**: 증상 문자열이 같다고 원인이 같은 게 아닙니다. 매번 **ESP32
+시리얼 로그를 밀리초 단위로 Gateway 로그와 대조**해서 "정확히 어느 순간
+무엇이 어긋났는지"를 짚은 것이 네 번 다 결정적이었습니다. Gateway 로그만
+봤다면 네 번 모두 "ACK를 못 받았다"까지밖에 못 갔을 것입니다.
+
+### ESP32 로그 뽑는 법
+
+로그가 매우 길어(수백 KB) 통째로 복사하면 앞부분만 남고 잘립니다.
+파일로 저장한 뒤 필요한 줄만 검색하세요.
+
+```powershell
+idf.py -p COM9 monitor | Tee-Object -FilePath esp_log.txt
+# 테스트 실행 → 끝나면 Ctrl+] 로 모니터 종료
+# 새 창에서:
+Select-String -Path esp_log.txt -Pattern "drain stopped|BODY_TIMEOUT|RADIO_ERROR|SYNC RX|fsm: |batch store"
+```
+
+`App version:` 줄도 꼭 확인하세요 — 빌드/플래시가 실제로 반영됐는지
+가장 빠르게 판별하는 방법입니다. (여러 대의 PC에 저장소 복제본이 따로
+있으면, 커밋한 쪽과 플래시한 쪽이 달라 수정이 반영 안 된 채 테스트하는
+일이 실제로 있었습니다.)
+
+---
+
+## 7. 참고
 
 | 문서 | 용도 |
 |---|---|
 | `docs/note/design-notes-gateway-ota-es.md` 41~42절 | 1장(싱크워드) 원인 규명 전체 경위 |
 | `docs/note/design-notes-gateway-ota-es.md` 48절 | 2장(MENU_OTA) 진단 경위 |
 | `docs/note/design-notes-gateway-ota-es.md` 50절 | 3장(ACK 채널 유실) 진단 경위 |
+| `docs/note/design-notes-gateway-ota-es.md` 54절 | 4장(동기화 교착) 진단 경위 |
+| `docs/note/design-notes-gateway-ota-es.md` 55절 | 5장(반이중 간격) 진단 경위 + 처리량 계산 |
 | `kernel-cc1101-spi/docs/troubleshooting-cc1101.md` | 그 아래(RF 물리 계층) 문제 — 인터럽트가 아예 안 울리는 경우 등 |
-| `firmware-esp32/fhss-ota-radio/main/fsm.c` | FSM 전이표·메뉴 게이팅 로직 원본 |
-| `firmware-esp32/fhss-ota-radio/components/fhss_service/fhss_service.c` | 3장의 `drain_rx_data_until()` 원본 (714~783행) |
+| `firmware-esp32/fhss-ota-radio/main/fsm.c` | FSM 전이표·메뉴 게이팅·동기화 타임아웃 상수 |
+| `firmware-esp32/fhss-ota-radio/components/fhss_service/fhss_service.c` | 3장의 `drain_rx_data_until()`, 4장의 `handle_miss()` |
+| `OTA_System/tests/smoke_fhss_ota_transfer_main.cpp` | 4·5장의 `kSyncSettleMs` / `kMinPacketGapMs` / `SlotAwareTransport` |
