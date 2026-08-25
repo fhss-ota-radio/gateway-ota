@@ -465,6 +465,10 @@ void OtaManager::onDiscoverClicked()
         appendLog(QStringLiteral("WARN"), tr("FHSS 처리가 끝난 뒤 조회하세요"));
         return;
     }
+    if (m_fhssActive) {
+        appendLog(QStringLiteral("WARN"), tr("FHSS를 중지한 뒤 기기를 조회하세요"));
+        return;
+    }
     if (m_session && m_session->state() != OtaSessionState::Idle
         && m_session->state() != OtaSessionState::Completed
         && m_session->state() != OtaSessionState::Failed) {
@@ -472,6 +476,46 @@ void OtaManager::onDiscoverClicked()
         // 있는 도중에 discoverDevices()까지 같은 fd를 건드리면 응답이 서로
         // 뒤섞일 수 있음 — 전송 중엔 조회를 막음.
         appendLog(QStringLiteral("WARN"), tr("전송이 진행 중입니다 — 완료/실패 후에 조회하세요"));
+        return;
+    }
+
+    // DISCOVER/FHSS_CONFIG/FHSS_ACTIVATE는 호핑 전 bootstrap 채널 0에서
+    // 주고받는다. 이전 앱이 비정상 종료되면 화면의 m_fhssActive=false와 달리
+    // 커널 worker는 계속 호핑할 수 있으므로, smoke_discover_main.cpp와 같은
+    // 순서로 실제 하드웨어 상태를 매 조회 전에 확정한다.
+    Cc1101Transport *cc = fhssTransport();
+    if (!cc) {
+        appendLog(QStringLiteral("ERROR"), tr("DISCOVER 준비 실패: CC1101 transport가 아닙니다"));
+        return;
+    }
+
+    Cc1101Status status = cc->stopFhss();
+    if (status != Cc1101Status::Ok) {
+        appendLog(QStringLiteral("ERROR"),
+                  tr("DISCOVER 준비 실패: FHSS 중지 오류(code=%1)")
+                      .arg(static_cast<int>(status)));
+        return;
+    }
+    status = cc->setChannel(0);
+    if (status != Cc1101Status::Ok) {
+        appendLog(QStringLiteral("ERROR"),
+                  tr("DISCOVER 준비 실패: 채널 0 설정 오류(code=%1)")
+                      .arg(static_cast<int>(status)));
+        return;
+    }
+    cc->flushRx();
+    status = cc->lastStatus();
+    if (status != Cc1101Status::Ok) {
+        appendLog(QStringLiteral("ERROR"),
+                  tr("DISCOVER 준비 실패: RX FIFO 초기화 오류(code=%1)")
+                      .arg(static_cast<int>(status)));
+        return;
+    }
+    status = cc->startRx();
+    if (status != Cc1101Status::Ok) {
+        appendLog(QStringLiteral("ERROR"),
+                  tr("DISCOVER 준비 실패: RX 진입 오류(code=%1)")
+                      .arg(static_cast<int>(status)));
         return;
     }
 
