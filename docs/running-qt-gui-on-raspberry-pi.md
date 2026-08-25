@@ -131,6 +131,71 @@ killall OTA_System 2>/dev/null   # 종료
 
 - LCD에 VNC 없이 직접 띄우기(`linuxfb`/`eglfs` 플러그인 포함된 Qt6
   구하거나 직접 빌드) — 지금은 시도 안 함
-- 맥에서 Docker+QEMU로 크로스컴파일하는 방법 — 149 환경 점검 때
-  검토했지만 아직 실행 안 함 (`docs/note/design-notes-gateway-ota-es.md`
-  69절)
+- ~~맥에서 Docker+QEMU로 크로스컴파일하는 방법~~ — 2026-08-25, 이 파이를
+  만든 욕토 빌드 환경(bitbake)에 접근 가능하다는 게 확인돼서, 아래
+  7절의 "욕토 SDK로 크로스컴파일" 쪽이 더 정확한 방법으로 확정됨.
+  Docker+QEMU로 일반 ARM Linux를 흉내내는 방식은 라이브러리 버전이 이
+  파이와 정확히 안 맞으면(특히 욕토 최소 이미지는 glibc/Qt6 버전이
+  일반 배포판과 다를 수 있음) 실행 시 에러가 날 수 있어서 후순위로
+  미룸.
+
+## 7. 맥에서 크로스컴파일 — 욕토 SDK 사용 (2026-08-25 확정)
+
+**왜 이 방법인가**: OTA_System은 cmake+Qt6로 빌드하는데, 이 파이는
+욕토(Yocto) 최소 이미지라 그 안에 cmake/Qt6 개발 패키지가 없다(1·2절
+참고). 파이 안에서 직접 빌드가 안 되면 남은 선택은 "다른 컴퓨터에서
+빌드해서 바이너리만 옮기기(크로스컴파일)"인데, 아무 ARM Linux 툴체인이나
+쓰면 위험하다 — 이 파이의 glibc(C 표준 라이브러리) 버전, Qt6 라이브러리
+버전이 빌드 환경과 정확히 안 맞으면 "실행은 되는데 라이브러리를 못
+찾음" 또는 "실행하자마자 죽음" 같은 문제가 생긴다. **욕토 SDK
+(bitbake `populate_sdk`)는 이 정확한 이미지를 만든 바로 그 설정으로
+크로스 툴체인 + sysroot(대상 기기의 라이브러리/헤더 사본)를 통째로
+뽑아주므로, 버전이 100% 일치하는 걸 보장하는 유일한 방법이다.**
+
+**주의**: bitbake는 리눅스 전용 도구라 맥에서 직접 못 돌린다 —
+1단계는 반드시 이 파이를 빌드했던 욕토 빌드 서버/VM에서 실행해야 함.
+2단계부터(SDK 설치 이후)는 리눅스 환경이면 어디서든(빌드 서버, 맥 위
+Docker, 또는 필요하면 이 대화의 리눅스 작업 환경에 SDK 설치 스크립트를
+올려줘도 됨) 가능하다.
+
+**1단계 — 욕토 빌드 서버에서 SDK 생성**:
+```bash
+# <image-name>은 이 파이를 만들 때 쓴 이미지 레시피 이름
+# (예: core-image-minimal, 또는 프로젝트 커스텀 이미지 이름 —
+#  bitbake-layers show-recipes 또는 build/conf/local.conf에서 확인 가능)
+bitbake <image-name> -c populate_sdk
+```
+빌드가 끝나면 `tmp/deploy/sdk/` 아래에 `*.sh` 설치 스크립트가 하나
+생긴다(예: `oecore-x86_64-cortexa76-toolchain-<버전>.sh` — 이름은
+호스트/타겟 아키텍처에 따라 다름).
+
+**2단계 — SDK 설치** (빌드 서버 또는 다른 리눅스 환경에서):
+```bash
+./oecore-*-toolchain-*.sh
+# 기본 설치 경로 그대로 Enter (보통 /opt/poky/<버전>/)
+```
+
+**3단계 — 환경 활성화 + 빌드**:
+```bash
+source /opt/poky/*/environment-setup-*
+cd gateway-ota
+cmake -S . -B build-cross
+cmake --build build-cross
+```
+`environment-setup-*` 스크립트가 `CC`/`CXX`/`PKG_CONFIG_SYSROOT_DIR`
+등을 전부 이 파이용 크로스 툴체인으로 맞춰놓기 때문에, cmake 명령
+자체는 평소와 똑같이 치면 된다 — 이 환경이 활성화된 "같은 쉘
+세션"에서만 실행해야 하는 게 유일한 주의점.
+
+**4단계 — 바이너리를 파이로 전송**:
+```bash
+scp build-cross/OTA_System/OTA_System root@<파이IP>:~/gateway-ota/build/OTA_System/
+```
+(정확한 출력 경로는 `find build-cross -name OTA_System` 으로 먼저 확인)
+
+**아키텍처 확인이 필요하면** 파이에서 `uname -m` 한 번 실행해서
+`aarch64`(64비트)인지 `armv7l`(32비트)인지 확인해두면, SDK 설치
+스크립트 이름이 맞는지 교차 확인하기 편하다.
+
+SDK 설치 스크립트(.sh)를 이 대화의 작업 폴더에 올려주시면, 이후 cmake
+빌드(3~4단계)는 제가 대신 실행해드릴 수 있습니다.
