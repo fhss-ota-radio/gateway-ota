@@ -317,7 +317,16 @@ private:
                 // [수정] 여기서 "슬롯이 바뀐 걸 방금 발견했다"는 사실 자체가
                 // 곧 "새 슬롯이 막 시작했다"는 뜻이므로, 폴백 루프로 넘기지
                 // 않고 이 자리에서 바로 그 슬롯을 새 창으로 채택한다.
-                if (adoptWindow(status.currentSlot))
+                //
+                // [2026-08-25 추가, 68절] 148 재검증에서 이 수정이 효과가
+                // 전혀 없었다(격슬롯 스킵 패턴 100% 그대로, 소요시간도
+                // 초 단위까지 동일). adoptWindow() 내부 재확인 시점에
+                // 이미 슬롯이 한 번 더 넘어가서 채택이 실패 -> 결국 아래
+                // 폴백 루프로 떨어지고 있을 거라는 가설을 세웠는데, 로그
+                // 상 "이 빠른 경로로 왔는지 폴백으로 왔는지" 구분이 안 돼서
+                // 확인이 불가능했다. via 태그 + 재확인 소요시간 로그를
+                // 추가해 다음 실기기 테스트에서 바로 확인 가능하게 함.
+                if (adoptWindow(status.currentSlot, "fast"))
                     return true;
                 m_openWindowSlot = kNoWindow;
             } else {
@@ -344,7 +353,7 @@ private:
             if (status.currentSlot == baselineSlot)
                 continue;
 
-            if (adoptWindow(status.currentSlot))
+            if (adoptWindow(status.currentSlot, "fallback"))
                 return true;
             // 채택 실패(가드 대기 중 슬롯이 또 넘어감 등) -> baseline을
             // 갱신하지 않고 계속 대기하면 다음 루프에서 곧바로 최신 슬롯을
@@ -359,18 +368,36 @@ private:
     // status.currentSlot을 새 안전 창으로 채택한다 — kPostSyncGuardMs만큼
     // 대기해 슬롯 경계가 흔들리지 않는지 재확인한 뒤에만 연다. 실패하면
     // 창을 열지 않고 false만 반환(호출부가 폴백 루프로 계속 진행).
-    bool adoptWindow(uint64_t slot)
+    //
+    // [2026-08-25 추가, 68절] via/adopt_elapsed_ms 진단용 인자 — 어느
+    // 호출부(즉시 채택 경로 "fast" vs 폴백 루프 "fallback")에서 왔는지,
+    // 그리고 이 함수 안에서 kPostSyncGuardMs 대기 + getFhssStatus() 왕복에
+    // 실제로 몇 ms가 걸렸는지를 남긴다. "fast 경로가 실제로 타는지",
+    // "재확인까지 25ms보다 훨씬 오래 걸려서 슬롯을 또 놓치는 건 아닌지"를
+    // 확인하기 위함 — 68절에서 gap-tuning 수정이 효과 없었던 원인 후보.
+    bool adoptWindow(uint64_t slot, const char *via)
     {
+        const auto adoptStart = std::chrono::steady_clock::now();
         std::this_thread::sleep_for(std::chrono::milliseconds(kPostSyncGuardMs));
         const auto verified = m_transport.getFhssStatus();
-        if (!usable(verified) || verified.currentSlot != slot)
+        const int64_t adoptElapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - adoptStart).count();
+
+        if (!usable(verified) || verified.currentSlot != slot) {
+            std::cerr << "[fhss_ota][slot_tx] adopt 실패 via=" << via
+                      << " expected_slot=" << slot
+                      << " actual_slot=" << verified.currentSlot
+                      << " adopt_elapsed_ms=" << adoptElapsedMs << "\n";
             return false;
+        }
 
         m_openWindowSlot = slot;
         m_windowOpenedAt = std::chrono::steady_clock::now();
         std::cout << "[fhss_ota][slot_tx] new window slot=" << slot
                   << " channel=" << static_cast<unsigned>(verified.currentChannel)
-                  << " post_sync_ms=" << kPostSyncGuardMs << "\n";
+                  << " post_sync_ms=" << kPostSyncGuardMs
+                  << " via=" << via
+                  << " adopt_elapsed_ms=" << adoptElapsedMs << "\n";
         return true;
     }
 
