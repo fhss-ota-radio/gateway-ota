@@ -3,6 +3,7 @@
 
 #include "cc1101transport.h" // Cc1101Transport — onConnectClicked()에서 실제로 생성
 #include "fhssrollout.h"     // FhssHopPolicy/rolloutFhssConfig() — FHSS CONFIG/ACTIVATE 핸드셰이크
+#include "slotawaretransport.h" // SlotAwareTransport — Task #6, onStartClicked()의 호핑 경로에서 사용
 
 extern "C" {
 #include "ota_protocol.h" // OTA_BROADCAST_DEVICE_ID
@@ -80,12 +81,14 @@ OtaManager::OtaManager(QWidget *parent)
 
 OtaManager::~OtaManager()
 {
-    // m_session이 m_transport를 참조(ITransport&)로 들고 있어서, m_transport가
-    // 먼저 사라지면 안 됨 — unique_ptr 소멸 순서는 선언 역순(m_tickTimer,
-    // m_session, m_transport 순으로 선언했으니 소멸은 그 반대)이라 자동으로
-    // m_session이 m_transport보다 먼저 사라져서 문제없지만, 명시적으로 한 번
-    // 더 순서를 강제해서 이 불변조건이 헤더 선언 순서에 몰래 의존하지 않게 함.
+    // m_session이 m_transport(또는 m_slotAwareTransport)를 참조(ITransport&)로
+    // 들고 있어서, 참조 대상이 먼저 사라지면 안 됨. 게다가 m_slotAwareTransport
+    // 자신도 Cc1101Transport&로 m_transport 내부를 참조하므로(호핑 모드일 때만
+    // 존재, otamanager.h 주석 참고) 순서가 반드시 m_session -> m_slotAwareTransport
+    // -> m_transport여야 함. 선언 순서(자동 소멸은 그 역순)에 몰래 기대지 않고
+    // 여기서 명시적으로 강제함.
     m_session.reset();
+    m_slotAwareTransport.reset();
     m_transport.reset();
     delete ui;
 }
@@ -240,6 +243,11 @@ void OtaManager::onConnectClicked()
             ui->fhssStopButton->setEnabled(false);
         }
         m_session.reset();
+        // [2026-08-25, Task #6] m_slotAwareTransport가 m_transport(정확히는
+        // fhssTransport()가 가리키는 Cc1101Transport)를 참조로 들고 있으므로
+        // (otamanager.h 주석 참고), m_transport를 close/reset하기 전에 먼저
+        // 비워야 함 — ~OtaManager()의 같은 순서 강제와 동일한 이유.
+        m_slotAwareTransport.reset();
         if (m_transport)
             m_transport->close();
         m_transport.reset();
@@ -360,14 +368,55 @@ void OtaManager::onStartClicked()
     // 한 번이 하나의 세션"이라는 개념을 일관되게 유지, 로그 추적도 쉬움).
     // 0을 넘기면(FHSS 비활성 또는 대상이 다름) OtaSession이 내부적으로
     // 새 session_id를 무작위 생성함(otasession.h start() 기본값 0의 의미).
-    const uint32_t sessionIdToReuse =
-        (m_fhssActive && targetDeviceId == m_fhssTargetDeviceId) ? m_fhssSessionId : 0;
+    const bool useHopping = m_fhssActive && targetDeviceId == m_fhssTargetDeviceId;
+    const uint32_t sessionIdToReuse = useHopping ? m_fhssSessionId : 0;
 
     m_retransmitEventCount = 0;
-    // otasession.h 67~72행 기본값(batchSize=5, timeoutMs=300, maxRetry=5,
-    // chunkDelayMs=40) 그대로 씀 — 전부 실기기 검증으로 확정된 값
-    // (docs/roadmap.md 3절)
-    m_session = std::make_unique<OtaSession>(*m_transport);
+
+    // 세션을 새로 만들기 전에 먼저 정리 — m_session이 참조로 들고 있는
+    // transport(m_slotAwareTransport 또는 m_transport)를 아래에서 바꿀 수도
+    // 있으므로, 옛 세션의 참조부터 끊어야 함(otamanager.h m_slotAwareTransport
+    // 주석 참고). onStartClicked() 위쪽 가드(324~329행)가 "진행 중" 상태는
+    // 이미 막아놨으므로 여기 남아있는 m_session은 Idle/Completed/Failed뿐임.
+    m_session.reset();
+
+    // [2026-08-25, Task #6] "FHSS 활성화"가 이 대상과 돼 있는지에 따라 완전히
+    // 다른 두 CLI 도구의 로직을 그대로 재사용한다 — 새로 로직을 안 짜고
+    // 이미 실기기 검증된 조합을 그대로 씀(왜 이렇게 나눴는지는 위 useHopping
+    // 계산에 쓰인 m_fhssActive/session_id 재사용 주석과 같은 맥락).
+    if (useHopping) {
+        // tests/smoke_fhss_ota_transfer_main.cpp 259~269행과 동일:
+        // SlotAwareTransport로 감싸고, batchSize=5/timeoutMs=300/maxRetry=20/
+        // chunkDelayMs=0을 씀. maxRetry가 평소(5)보다 4배 큰 이유는 ESP32가
+        // 호핑 중 SYNC를 잃으면 재동기화에 최악 3.3초 걸릴 수 있어서
+        // (위 kFhssSyncSettleMs 주석과 같은 근거) — 5회(약 1초)로는 그 전에
+        // Gateway가 먼저 포기해버림(design-notes 56절). chunkDelayMs=0인
+        // 이유는 SlotAwareTransport가 슬롯 게이팅으로 패킷 간격을 자체적으로
+        // 소유해서, OtaSession이 별도로 또 delay를 주면 이중으로 느려지기
+        // 때문.
+        Cc1101Transport *cc1101 = fhssTransport();
+        if (!cc1101) {
+            // FHSS가 활성화될 수 있었다는 건 fhssTransport()가 이미 한 번
+            // 성공했다는 뜻이라 사실상 도달 안 하는 분기지만, m_transport가
+            // 연결 해제/재연결 등으로 바뀌었을 가능성을 대비해 방어적으로 확인.
+            appendLog(QStringLiteral("ERROR"), tr("FHSS 전송 실패: CC1101 transport를 찾을 수 없음"));
+            return;
+        }
+        m_slotAwareTransport =
+            std::make_unique<SlotAwareTransport>(*cc1101, m_fhssGeneration, m_fhssSlotDurationUs);
+        m_session = std::make_unique<OtaSession>(*m_slotAwareTransport, /*batchSize=*/5,
+                                                  /*timeoutMs=*/300, /*maxRetry=*/20,
+                                                  /*chunkDelayMs=*/0);
+    } else {
+        // 호핑을 안 쓸 땐 SlotAwareTransport 자체가 필요 없음 — 있으면
+        // m_transport를 계속 붙들고 있어서(생성자가 참조를 저장) 다음번
+        // 연결 해제 등에서 혼란을 줄 수 있으므로 확실히 비워둠.
+        m_slotAwareTransport.reset();
+        // otasession.h 67~72행 기본값(batchSize=5, timeoutMs=300, maxRetry=5,
+        // chunkDelayMs=40) 그대로 씀 — 전부 실기기 검증으로 확정된 값
+        // (docs/roadmap.md 3절)
+        m_session = std::make_unique<OtaSession>(*m_transport);
+    }
     m_session->setOnStateChanged([this](OtaSessionState state) { handleSessionStateChanged(state); });
 
     if (!m_session->start(m_selectedFilePath.toStdString(), targetDeviceId, sessionIdToReuse)) {
@@ -760,10 +809,17 @@ void OtaManager::onFhssActivateClicked()
             return;
         }
 
-        // ESP32가 랑데부 채널에서 SYNC_ACQUIRED까지 가는 데 보통 1~2초 걸림
-        // (smoke_fhss_ota_transfer_main.cpp 76~81행 주석과 같은 값/이유) —
-        // 그 전에 OTA_START를 보내면 응답이 없을 수 있어서 여유를 두고 기다림.
-        constexpr int kFhssSyncSettleMs = 2000;
+        // [2026-08-25 정정: 2000 -> 4000] smoke_fhss_ota_transfer_main.cpp
+        // 83~107행에 기록된 실기기 교착 버그와 완전히 같은 값이라 여기도
+        // 그대로 맞춤. 요약: Gateway는 이미 여러 채널을 순회 중이라 ESP32가
+        // 기다리는 랑데부 채널로 돌아오는 주기가 최악 2.4초(300ms x 8슬롯)
+        // + 첫 SYNC 획득까지 0.9초 = 최악 3.3초 걸릴 수 있다. 2000ms만
+        // 기다리고 OTA_START/DATA를 먼저 보내버리면, 아직 SEARCHING 단계인
+        // ESP32가 그 DATA 처리에 밀려 다음 SYNC를 놓치고 랑데부로 되돌아가는
+        // 일이 반복돼 영원히 TRACKING에 못 가고 결국 ESP32의 동기화
+        // 타임아웃으로 세션이 폐기된다(148 실기기 로그로 재현됨). 최악
+        // 3.3초 + 여유를 둬서 4000ms.
+        constexpr int kFhssSyncSettleMs = 4000;
         QThread::msleep(kFhssSyncSettleMs);
 
         const auto status = transport->getFhssStatus();
@@ -785,6 +841,13 @@ void OtaManager::onFhssActivateClicked()
     // 여기서 미리 저장해둠(실패해도 남아있는 게 무해함 — m_fhssActive가
     // false인 한 onStartClicked()의 session_id 재사용 조건에서 안 걸림).
     m_fhssTargetDeviceId = targetDeviceId;
+    // [2026-08-25, Task #6] generation도 같은 이유로 미리 저장 — 이후
+    // onStartClicked()가 SlotAwareTransport(transport, generation,
+    // slotDurationUs)를 만들 때 "이번에 실제로 활성화에 쓴 값"을 그대로
+    // 넘겨야 하므로(otamanager.h m_fhssGeneration 주석 참고). slotDurationUs는
+    // 위 policy.slotDurationUs와 항상 같은 고정값(300000)이라 멤버 기본값
+    // 그대로 둠.
+    m_fhssGeneration = generation;
 }
 
 void OtaManager::onFhssStopClicked()
