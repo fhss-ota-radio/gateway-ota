@@ -25,6 +25,7 @@
 
 #include "cc1101transport.h"
 #include "otasession.h"
+#include "teelogger.h" // gw_log_YYYYMMDD_HHMMSS.txt 자동 저장 (teelogger.h 상단 주석 참고)
 
 extern "C" {
 #include "ota_protocol.h"
@@ -75,6 +76,8 @@ void printUsage(const char *argv0)
 
 int main(int argc, char *argv[])
 {
+    TeeLogger logger("gw_log"); // 맨 처음(사용법 오류 포함) — smoke_fhss_ota_transfer_main.cpp와 동일 이유
+
     if (argc < 3) {
         printUsage(argv[0]);
         return 1;
