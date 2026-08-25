@@ -194,6 +194,35 @@ Cc1101Transport *OtaManager::fhssTransport() const
     return dynamic_cast<Cc1101Transport *>(m_transport.get());
 }
 
+bool OtaManager::prepareFixedOta(Cc1101Transport *transport, const QString &context)
+{
+    if (!transport) {
+        appendLog(QStringLiteral("ERROR"), tr("%1: CC1101 transport를 찾을 수 없음").arg(context));
+        return false;
+    }
+
+    // ota_smoke_fhss_reset과 동일한 순서로 이전 실행의 FHSS/채널/FIFO 상태를
+    // 정리한다. stopFhss()는 이미 정지된 경우도 허용하고, 이후 단계는 하나라도
+    // 실패하면 전송을 시작하지 않는다.
+    (void)transport->stopFhss();
+    if (transport->setChannel(0) != Cc1101Status::Ok) {
+        appendLog(QStringLiteral("ERROR"), tr("%1: setChannel(0) 실패").arg(context));
+        return false;
+    }
+    transport->flushRx();
+    if (transport->lastStatus() != Cc1101Status::Ok) {
+        appendLog(QStringLiteral("ERROR"), tr("%1: flushRx 실패").arg(context));
+        return false;
+    }
+    if (transport->startRx() != Cc1101Status::Ok) {
+        appendLog(QStringLiteral("ERROR"), tr("%1: startRx 실패").arg(context));
+        return false;
+    }
+
+    appendLog(QStringLiteral("INFO"), tr("%1: 비호핑 채널 0 준비 완료").arg(context));
+    return true;
+}
+
 void OtaManager::appendLog(const QString &tag, const QString &message)
 {
     const QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss.zzz"));
@@ -300,8 +329,7 @@ void OtaManager::onConnectClicked()
     // 빠져 있으면 DISCOVER_ACK/ACK/NACK을 하나도 못 받는다 — CLI 도구들
     // (ota_smoke_discover 등)은 전부 open() 직후 startRx()를 부르는데
     // 이 화면 코드엔 없었음. 상세 경위: design-notes-gateway-ota-es.md 44절
-    if (transport->startRx() != Cc1101Status::Ok) {
-        appendLog(QStringLiteral("ERROR"), tr("CC1101 연결 실패: startRx 실패"));
+    if (!prepareFixedOta(transport.get(), tr("CC1101 연결"))) {
         transport->close();
         return;
     }
@@ -436,12 +464,20 @@ void OtaManager::onStartClicked()
         // m_transport를 계속 붙들고 있어서(생성자가 참조를 저장) 다음번
         // 연결 해제 등에서 혼란을 줄 수 있으므로 확실히 비워둠.
         m_slotAwareTransport.reset();
-        // otasession.h 67~72행 기본값(batchSize=5, timeoutMs=300, maxRetry=5,
-        // chunkDelayMs=40) 그대로 씀 — 전부 실기기 검증으로 확정된 값
-        // (docs/roadmap.md 3절)
-        m_session = std::make_unique<OtaSession>(*m_transport);
+        Cc1101Transport *cc1101 = fhssTransport();
+        if (!prepareFixedOta(cc1101, tr("비호핑 OTA 시작")))
+            return;
+        // 2026-08-25 .149 실기기에서 START와 DATA/ACK 3842개까지 검증된
+        // ota_smoke_session_send 인자와 동일: batch=5, timeout=600ms,
+        // maxRetry=20, chunkDelay=40ms.
+        m_session = std::make_unique<OtaSession>(*m_transport, /*batchSize=*/5,
+                                                  /*timeoutMs=*/600, /*maxRetry=*/20,
+                                                  /*chunkDelayMs=*/40);
     }
     m_session->setOnStateChanged([this](OtaSessionState state) { handleSessionStateChanged(state); });
+    m_session->setOnLog([this](const std::string &message) {
+        appendLog(QStringLiteral("OTA"), QString::fromStdString(message));
+    });
 
     if (!m_session->start(m_selectedFilePath.toStdString(), targetDeviceId, sessionIdToReuse)) {
         appendLog(QStringLiteral("ERROR"),

@@ -87,6 +87,7 @@ private:
     // 성공하지만, 나중에 다른 ITransport 구현체가 생기면 그때는 nullptr이
     // 돌아올 수 있어 호출부마다 null 체크 필요).
     Cc1101Transport *fhssTransport() const;
+    bool prepareFixedOta(Cc1101Transport *transport, const QString &context);
 
     // otamanager.ui에서 setupUi()가 채워주는 위젯 트리 (portEdit, connectButton,
     // unicastRadio/broadcastRadio, targetCombo, selectFileButton,
