@@ -66,6 +66,8 @@ add_library(ota_core STATIC
     transport/cc1101_status.h
     transport/cc1101transport.h
     transport/cc1101transport.cpp
+    transport/slotawaretransport.h
+    transport/slotawaretransport.cpp
 )
 target_compile_features(ota_core PUBLIC cxx_std_17)
 target_include_directories(ota_core PUBLIC
