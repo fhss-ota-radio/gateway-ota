@@ -5,6 +5,65 @@ project(OTA_System LANGUAGES CXX)
 # (core/·transport/에서 Qt 타입을 제거한 결정, docs/note/design-notes-gateway-ota-es.md 참고)
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets)
 
+# ---------- 빌드 버전 정보 (build_info.h.in 참고) ----------
+# [2026-08-25] cmake를 다시 돌릴 때(=재빌드할 때)마다 그 시점의 git 커밋
+# 해시/브랜치를 자동으로 build/generated/build_info.h에 채워 넣는다.
+# 사람이 커밋마다 버전 문자열을 손으로 바꿀 필요가 없고, 실기기(라즈베리
+# 파이)에서 "지금 이 바이너리가 최신 커밋으로 재빌드된 게 맞는지" 창
+# 제목/시작 로그만 보고 바로 확인할 수 있게 하려는 목적 — build_info.h.in
+# 상단 주석에 배경 정리.
+find_package(Git QUIET)
+set(OTA_SYSTEM_GIT_HASH "unknown")
+set(OTA_SYSTEM_GIT_BRANCH "unknown")
+set(OTA_SYSTEM_GIT_DIRTY 0)
+if(Git_FOUND)
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} rev-parse --short=8 HEAD
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        OUTPUT_VARIABLE OTA_SYSTEM_GIT_HASH
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} rev-parse --abbrev-ref HEAD
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        OUTPUT_VARIABLE OTA_SYSTEM_GIT_BRANCH
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    # 커밋 안 된 로컬 변경이 있는 상태로 빌드하면 표시가 실제 커밋 해시와
+    # 안 맞을 수 있으므로("-dirty" 표시로 구분) — porcelain 출력이 비어있지
+    # 않으면 변경사항이 있다는 뜻.
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} status --porcelain
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        OUTPUT_VARIABLE OTA_SYSTEM_GIT_STATUS
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if(NOT "${OTA_SYSTEM_GIT_STATUS}" STREQUAL "")
+        set(OTA_SYSTEM_GIT_DIRTY 1)
+    endif()
+    if("${OTA_SYSTEM_GIT_HASH}" STREQUAL "")
+        set(OTA_SYSTEM_GIT_HASH "unknown")
+    endif()
+    if("${OTA_SYSTEM_GIT_BRANCH}" STREQUAL "")
+        set(OTA_SYSTEM_GIT_BRANCH "unknown")
+    endif()
+endif()
+if(OTA_SYSTEM_GIT_DIRTY)
+    set(OTA_SYSTEM_GIT_DIRTY_SUFFIX ", 커밋 안 된 로컬 변경 있음(dirty)")
+else()
+    set(OTA_SYSTEM_GIT_DIRTY_SUFFIX "")
+endif()
+message(STATUS "OTA_System 빌드 버전: ${OTA_SYSTEM_GIT_HASH} (${OTA_SYSTEM_GIT_BRANCH}${OTA_SYSTEM_GIT_DIRTY_SUFFIX})")
+
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/build_info.h.in
+    ${CMAKE_CURRENT_BINARY_DIR}/generated/build_info.h
+    @ONLY
+)
+
 qt_standard_project_setup()
 
 # ---------- ota-protocol: firmware-esp32와 공유하는 OTA 패킷 규격 ----------
@@ -92,6 +151,14 @@ target_link_libraries(OTA_System
         Qt::Core
         Qt::Widgets
         ota_core
+)
+
+# build_info.h가 소스 트리가 아니라 빌드 폴더(${CMAKE_CURRENT_BINARY_DIR}/generated)에
+# 생성되므로, 이 include 경로를 추가해야 main.cpp/otamanager.cpp에서
+# #include "build_info.h"로 찾을 수 있음.
+target_include_directories(OTA_System
+    PRIVATE
+        ${CMAKE_CURRENT_BINARY_DIR}/generated
 )
 
 # [2026-08-25] 한글 폰트를 실행 파일 옆에 배포 (main.cpp의 loadKoreanFont() 참고)

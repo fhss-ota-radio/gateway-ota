@@ -33,6 +33,7 @@
 #include "fhssrollout.h"
 #include "otasession.h"
 #include "slotawaretransport.h"
+#include "teelogger.h" // gw_log_YYYYMMDD_HHMMSS.txt 자동 저장 (teelogger.h 상단 주석 참고)
 
 #include <chrono>
 #include <cstdio>
@@ -115,6 +116,12 @@ constexpr int kSyncSettleMs = 4000;
 
 int main(int argc, char *argv[])
 {
+    // [2026-08-25] 맨 처음(사용법 출력보다도 먼저) 로그 파일부터 열어야
+    // 그 이후의 모든 std::cout/cerr(사용법 오류 포함)까지 다 잡힌다 —
+    // teelogger.h 상단 주석 참고. 148 실기기 테스트에서 "이 실행에 대응하는
+    // Gateway 로그가 없다"는 문제가 실제로 있었음(design-notes 73절).
+    TeeLogger logger("gw_log");
+
     if (argc < 6) {
         printUsage(argv[0]);
         return 1;

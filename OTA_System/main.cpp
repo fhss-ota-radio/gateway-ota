@@ -1,10 +1,13 @@
 #include "ui/otamanager.h"
 
+#include "build_info.h" // cmake가 생성 — OTA_SYSTEM_GIT_HASH 등 (build_info.h.in 참고)
+
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDebug>
 #include <QFont>
 #include <QFontDatabase>
+#include <QString>
 
 // [2026-08-25] 한글 폰트를 실행 파일과 함께 배포해서 강제 로드한다.
 //
@@ -39,11 +42,28 @@ static void loadKoreanFont()
     qDebug() << "한글 폰트 로드 완료:" << families.first();
 }
 
+// [2026-08-25] 창 제목에 커밋 해시를 넣어서, 실기기(라즈베리파이)에서
+// "지금 이 바이너리가 최신 커밋으로 재빌드된 게 맞는지" 창만 봐도 바로
+// 확인 가능하게 함 — 096dcdc로 빌드된 걸 최신인 줄 알고 테스트하다가
+// 뒤늦게 안 됨 문제가 실제로 있었음(design-notes 참고). ESP32 쪽이
+// 부팅 로그에 "App version: <git hash>"를 자동으로 찍는 것과 같은 목적.
+// build_info.h는 cmake가 재빌드할 때마다 자동 생성하므로(build_info.h.in
+// 참고) 커밋마다 사람이 손으로 바꿀 게 없다.
+static QString buildVersionString()
+{
+    QString version = QStringLiteral(OTA_SYSTEM_GIT_HASH);
+    if (OTA_SYSTEM_GIT_DIRTY)
+        version += QStringLiteral("-dirty");
+    version += QStringLiteral(" (") + QStringLiteral(OTA_SYSTEM_GIT_BRANCH) + QStringLiteral(")");
+    return version;
+}
+
 int main(int argc, char *argv[])
 {
     QApplication a(argc, argv);
     loadKoreanFont();
     OtaManager w;
+    w.setWindowTitle(w.windowTitle() + QStringLiteral(" — ") + buildVersionString());
     w.show();
     return QApplication::exec();
 }

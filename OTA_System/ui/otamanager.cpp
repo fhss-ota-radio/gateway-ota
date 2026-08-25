@@ -1,6 +1,8 @@
 #include "otamanager.h"
 #include "ui_otamanager.h"
 
+#include "build_info.h" // cmake가 생성 — OTA_SYSTEM_GIT_HASH 등 (build_info.h.in 참고)
+
 #include "cc1101transport.h" // Cc1101Transport — onConnectClicked()에서 실제로 생성
 #include "fhssrollout.h"     // FhssHopPolicy/rolloutFhssConfig() — FHSS CONFIG/ACTIVATE 핸드셰이크
 #include "slotawaretransport.h" // SlotAwareTransport — Task #6, onStartClicked()의 호핑 경로에서 사용
@@ -76,6 +78,15 @@ OtaManager::OtaManager(QWidget *parent)
     connect(m_fhssStatusTimer, &QTimer::timeout, this, &OtaManager::onFhssStatusTick);
     m_fhssStatusTimer->start();
 
+    // [2026-08-25] 창 제목(main.cpp)과 별개로 로그(=파일에도 자동 저장됨,
+    // 위 m_logFile 주석 참고)에도 남겨서, GUI를 안 보고 로그 파일만 봐도
+    // 어느 커밋으로 빌드됐는지 바로 확인 가능하게 함.
+    appendLog(QStringLiteral("INFO"),
+              tr("빌드 버전: %1%2 (%3), 빌드 시각: %4")
+                  .arg(QStringLiteral(OTA_SYSTEM_GIT_HASH),
+                       OTA_SYSTEM_GIT_DIRTY ? QStringLiteral("-dirty") : QString(),
+                       QStringLiteral(OTA_SYSTEM_GIT_BRANCH),
+                       QStringLiteral(OTA_SYSTEM_BUILD_TIMESTAMP)));
     appendLog(QStringLiteral("INFO"), tr("화면 초기화 완료"));
 }
 

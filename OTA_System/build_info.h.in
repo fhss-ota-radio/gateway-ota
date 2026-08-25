@@ -1,0 +1,28 @@
+#ifndef BUILD_INFO_H
+#define BUILD_INFO_H
+
+// [2026-08-25] cmake 설정(configure) 시점에 자동으로 값이 채워지는
+// 빌드 정보 템플릿 — CMakeLists.txt의 configure_file()이 이 파일을 읽어서
+// @OTA_SYSTEM_GIT_HASH@ 같은 자리표시자를 실제 git 값으로 바꿔치기한 뒤
+// build/generated/build_info.h로 만들어낸다. 커밋할 때마다 사람이 직접
+// 버전 문자열을 바꿀 필요 없이, cmake를 다시 돌릴 때(즉 재빌드할 때)마다
+// 그 시점의 커밋 해시로 항상 자동 갱신됨.
+//
+// 왜 필요한가: 라즈베리파이 실기기 테스트 중 "지금 실행 중인 바이너리가
+// 최신 커밋으로 재빌드된 게 맞는지" 헷갈려서 혼선이 반복됨(예: 096dcdc로
+// 빌드된 걸 최신인 줄 알고 테스트하다가 뒤늦게 안 됨). firmware-esp32는
+// esp-idf의 app_desc 메커니즘이 부팅 로그에 "App version: <git hash>"를
+// 자동으로 찍어주는데, Qt(OTA_System) 쪽엔 그런 게 없었어서 같은 역할을
+// 하는 걸 만듦 — 크로스컴파일한 바이너리를 파이로 옮긴 뒤에도 창 제목/
+// 시작 로그만 보면 바로 어느 커밋인지 확인 가능.
+//
+// 주의: build/generated/build_info.h는 빌드 산출물이라 git에 안 올라감
+// (.gitignore의 /build*/ 패턴에 이미 걸림) — 직접 고치지 말 것. 값을
+// 바꾸려면 이 템플릿(build_info.h.in)이나 CMakeLists.txt의 git 명령
+// 부분을 고치세요.
+#define OTA_SYSTEM_GIT_HASH "@OTA_SYSTEM_GIT_HASH@"
+#define OTA_SYSTEM_GIT_BRANCH "@OTA_SYSTEM_GIT_BRANCH@"
+#define OTA_SYSTEM_GIT_DIRTY @OTA_SYSTEM_GIT_DIRTY@
+#define OTA_SYSTEM_BUILD_TIMESTAMP __DATE__ " " __TIME__
+
+#endif // BUILD_INFO_H
