@@ -494,29 +494,15 @@ void OtaManager::onDiscoverClicked()
     // 막았고, onStartClicked()/onConnectClicked() 쪽에도 m_discovering 검사를
     // 추가해서 조회가 끝나기 전엔 세션 시작·연결 해제를 못 하게 막아둠.
     //
-    // [2026-08-25] DISCOVER 전 FHSS 잔류 상태 초기화 — smoke_discover_main.cpp
-    // (CLI, 6ec6a34에서 이미 고침)와 동일한 문제가 이 화면 경로에도 그대로
-    // 있었다: 이전에 FHSS 활성화(CONFIG/ACTIVATE)를 한 번이라도 했으면 커널
-    // 드라이버가 여전히 호핑 중일 수 있는데, DISCOVER는 그 상태를 확인·정리
-    // 안 하고 그냥 보내서 브로드캐스트가 계속 엉뚱한(호핑 중인) 채널로
-    // 나갔다 — ESP32는 MENU_OTA에서 채널 1(rendezvous)만 듣고 있으니 영원히
-    // 응답을 못 받는다(실기기 재현: ESP32 로그 "LISTEN no-packet count=4200"
-    // — 168초 동안 패킷 자체를 하나도 못 받음). CLI와 같은 순서
-    // (stopFhss -> setChannel(0) -> flushRx)로 워커 스레드 안에서 정리한 뒤
-    // discoverDevices()를 부른다.
+    // [2026-08-25] DISCOVER 전 FHSS 잔류 상태 초기화(이전엔 이 화면 경로에만
+    // 빠져 있던 CLI 전용 리셋이었음 — 실기기로 재현된 문제)는 이제
+    // discoverDevices() 자신이 CC1101이면 항상 해준다(session/discovery.cpp
+    // resetLeftoverFhssStateIfCc1101() 참고). 이 화면은 CLI와 마찬가지로
+    // discoverDevices()만 부르면 되고, 리셋을 따로 신경 쓸 필요가 없다 —
+    // "CLI로 검증한 로직을 화면도 그대로 쓴다"는 원칙을 지키기 위해 화면
+    // 전용으로 따로 만들지 않았다.
     ITransport *transport = m_transport.get();
-    Cc1101Transport *fhssTransportPtr = fhssTransport();
-    QThread *worker = QThread::create([this, transport, fhssTransportPtr]() {
-        const auto logLine = [this](const QString &msg) {
-            QMetaObject::invokeMethod(
-                this, [this, msg]() { appendLog(QStringLiteral("WARN"), msg); }, Qt::QueuedConnection);
-        };
-        if (fhssTransportPtr) {
-            (void)fhssTransportPtr->stopFhss();
-            if (fhssTransportPtr->setChannel(0) != Cc1101Status::Ok)
-                logLine(QStringLiteral("DISCOVER 전 setChannel(0) 실패 — 계속 진행"));
-            transport->flushRx();
-        }
+    QThread *worker = QThread::create([this, transport]() {
         const std::vector<DiscoveredDevice> devices = discoverDevices(*transport, 1000);
         QMetaObject::invokeMethod(
             this, [this, devices]() { handleDiscoveredDevices(devices); }, Qt::QueuedConnection);
