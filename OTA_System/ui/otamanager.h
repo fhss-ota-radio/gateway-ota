@@ -5,6 +5,7 @@
 #include "itransport.h"  // ITransport — core/session과 같은 이유로 Qt 의존성 없음, 화면 헤더에
 #include "otasession.h"  // 직접 include해도 안전함 (cstdint/functional/string/vector만 씀)
 
+#include <QFile>
 #include <QMainWindow>
 #include <QString>
 
@@ -92,6 +93,15 @@ private:
     bool m_connected = false;
     QString m_selectedFilePath;
     qint64 m_selectedFileSize = 0;
+
+    // [2026-08-25] appendLog()가 화면 로그창(ui->logView)과 동시에 이 파일에도
+    // 매 줄을 기록함 — 실행 방식(터미널 직접 실행/tmux/백그라운드 무엇이든)
+    // 과 무관하게 항상 전송 로그가 디스크에 남게 하기 위함. 이전엔
+    // "./OTA_System > /tmp/ota.log 2>&1"처럼 쉘 리다이렉트에 의존했는데, 그건
+    // qDebug()/stderr만 받고 정작 중요한 appendLog()의 [INFO]/[WARN]/[ERROR]
+    // 전송 로그는 못 받았음(otamanager.cpp appendLog() 주석 참고). 생성자에서
+    // 딱 한 번 열고 앱 종료까지 계속 씀.
+    QFile m_logFile;
 
     // 화면이 소유하는 실제 전송 계층 + 세션. 둘 다 "연결"/"전송 시작" 버튼을
     // 누르기 전까지는 비어있다(nullptr) — otasession.h/itransport.h가 Qt 의존성

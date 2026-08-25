@@ -126,42 +126,50 @@
          </item>
          <item>
           <layout class="QFormLayout" name="targetFormLayout">
+           <!-- [2026-08-25] fieldGrowthPolicy를 ExpandingFieldsGrow로 지정 —
+                기본값(FieldsStayAtSizeHint)은 오른쪽 열 폭을 위젯의
+                sizeHint(권장 크기)로 고정해버려서, 아래 targetCombo에
+                minimumWidth를 줘도 QFormLayout이 그보다 좁게 렌더링할 수
+                있었음. Expanding으로 바꿔야 minimumWidth가 실제로 보장됨. -->
+           <property name="fieldGrowthPolicy"><enum>QFormLayout::ExpandingFieldsGrow</enum></property>
            <item row="0" column="0">
             <widget class="QLabel" name="targetLabel">
              <property name="text"><string>대상 ESP32 (무전기 노드)</string></property>
             </widget>
            </item>
            <item row="0" column="1">
-            <layout class="QHBoxLayout" name="targetRowLayout">
-             <item>
-              <widget class="QComboBox" name="targetCombo">
-               <!-- 2026-08-23: 자리표시자 "Node 01/02/03" 대신 비워둠 —
-                    discoverDevices() 결과로만 채워지고, 각 항목의 실제
-                    device_id(uint32_t)는 item data(Qt::UserRole)에 저장됨
-                    (표시 텍스트는 사람이 읽는 hex 문자열이라 파싱하지 않기
-                    위함). otamanager.cpp의 handleDiscoveredDevices() 참고.
+            <widget class="QComboBox" name="targetCombo">
+             <!-- 2026-08-23: 자리표시자 "Node 01/02/03" 대신 비워둠 —
+                  discoverDevices() 결과로만 채워지고, 각 항목의 실제
+                  device_id(uint32_t)는 item data(Qt::UserRole)에 저장됨
+                  (표시 텍스트는 사람이 읽는 hex 문자열이라 파싱하지 않기
+                  위함). otamanager.cpp의 handleDiscoveredDevices() 참고.
 
-                    [2026-08-25] minimumWidth 추가 — 항목 텍스트가
-                    "AA-BB-CC (fw 1.2.3)" 형식(handleDiscoveredDevices()
-                    참고)인데, rootLayout이 왼쪽 열을 stretch=0(내용물
-                    크기만큼만)으로 잡아서 기본 QComboBox 폭으로는 이 텍스트가
-                    잘려 보였음. sizePolicy도 Expanding으로 바꿔서 같은 줄의
-                    discoverButton과 남는 공간을 나눠 갖게 함. -->
-               <property name="sizePolicy">
-                <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
-                 <horstretch>0</horstretch>
-                 <verstretch>0</verstretch>
-                </sizepolicy>
-               </property>
-               <property name="minimumSize"><size><width>220</width><height>0</height></size></property>
-              </widget>
-             </item>
-             <item>
-              <widget class="QPushButton" name="discoverButton">
-               <property name="text"><string>기기 조회 (DISCOVER)</string></property>
-              </widget>
-             </item>
-            </layout>
+                  [2026-08-25 1차] minimumWidth=220 + sizePolicy Expanding을
+                  줬는데도 실기기(파이) 화면에서 "AA-BB-CC (" 뒤 fw 버전이
+                  계속 잘려 보임 — 원인은 이 위젯 자체가 아니라 부모
+                  targetFormLayout(QFormLayout)의 기본 fieldGrowthPolicy가
+                  FieldsStayAtSizeHint라서, 오른쪽 열이 minimumWidth를
+                  무시하고 sizeHint(권장폭)로만 렌더링됐기 때문. 그래서
+                  [2차]로 (1) fieldGrowthPolicy를 위에서 ExpandingFieldsGrow로
+                  바꾸고, (2) DISCOVER 버튼을 같은 줄에서 빼서 아래 행으로
+                  내려 이 콤보가 줄 전체 폭을 혼자 쓰게 재배치하고, (3)
+                  minimumWidth도 220 -> 260으로 더 넉넉히 늘림. -->
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+               <horstretch>0</horstretch>
+               <verstretch>0</verstretch>
+              </sizepolicy>
+             </property>
+             <property name="minimumSize"><size><width>260</width><height>0</height></size></property>
+            </widget>
+           </item>
+           <item row="1" column="1">
+            <widget class="QPushButton" name="discoverButton">
+             <!-- [2026-08-25] targetCombo와 같은 줄(QHBoxLayout)에 있다가,
+                  콤보 폭 확보를 위해 아래 행으로 재배치(위 주석 참고). -->
+             <property name="text"><string>기기 조회 (DISCOVER)</string></property>
+            </widget>
            </item>
           </layout>
          </item>

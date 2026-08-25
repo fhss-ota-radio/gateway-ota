@@ -9,13 +9,18 @@ extern "C" {
 }
 
 #include <QCloseEvent>
+#include <QCoreApplication>
 #include <QDateTime>
+#include <QDebug>
+#include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QRegularExpressionValidator>
 #include <QSettings>
+#include <QStringConverter>
+#include <QTextStream>
 #include <QThread>
 #include <QTimer>
 
@@ -26,6 +31,24 @@ OtaManager::OtaManager(QWidget *parent)
     , ui(new Ui::OtaManager)
 {
     ui->setupUi(this);
+
+    // [2026-08-25] 로그 자동 파일 저장 — 실행 파일 옆 logs/ 폴더에 실행마다
+    // 새 파일(ota_YYYYMMDD_HHMMSS.log)을 만듦. appendLog()가 나중에 이
+    // m_logFile을 쓰므로, appendLog()를 처음 부르기 전(setupConnections()
+    // 보다 먼저)에 열어야 함. mkpath()는 이미 폴더가 있어도 안전(무해)함.
+    const QString logDirPath = QCoreApplication::applicationDirPath() + QStringLiteral("/logs");
+    QDir().mkpath(logDirPath);
+    const QString logFileName = QStringLiteral("ota_%1.log")
+        .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")));
+    m_logFile.setFileName(logDirPath + QStringLiteral("/") + logFileName);
+    if (m_logFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        qDebug() << "로그 파일:" << m_logFile.fileName();
+    } else {
+        // 파일을 못 열어도(권한 문제 등) 화면 로그창은 정상 동작해야 하므로
+        // 여기서 앱을 막지 않음 — appendLog()가 m_logFile.isOpen()을 확인함.
+        qWarning() << "로그 파일을 열지 못함:" << m_logFile.fileName();
+    }
+
     setupConnections();
     loadSettings();
 
@@ -147,7 +170,21 @@ Cc1101Transport *OtaManager::fhssTransport() const
 void OtaManager::appendLog(const QString &tag, const QString &message)
 {
     const QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss.zzz"));
-    ui->logView->appendPlainText(QStringLiteral("%1 [%2] %3").arg(timestamp, tag, message));
+    const QString line = QStringLiteral("%1 [%2] %3").arg(timestamp, tag, message);
+    ui->logView->appendPlainText(line);
+
+    // [2026-08-25] 화면 로그창은 앱이 죽으면(강제종료, killall 등) 같이
+    // 사라짐 — "배치 재전송 한도 초과" 같은 실패 원인을 나중에 다시 보려면
+    // 파일로도 남아 있어야 함. 매 줄마다 바로 flush해서, 비정상 종료돼도
+    // 그 직전까지의 로그는 확실히 디스크에 남게 함(생성자의 m_logFile 주석
+    // 참고).
+    if (m_logFile.isOpen()) {
+        QTextStream out(&m_logFile);
+        out.setEncoding(QStringConverter::Utf8);
+        out << line << '\n';
+        out.flush();
+        m_logFile.flush();
+    }
 }
 
 void OtaManager::recalcChunkInfo()
