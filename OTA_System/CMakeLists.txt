@@ -94,6 +94,36 @@ target_link_libraries(OTA_System
         ota_core
 )
 
+# [2026-08-25] 한글 폰트를 실행 파일 옆에 배포 (main.cpp의 loadKoreanFont() 참고)
+#
+# 라즈베리파이 욕토 이미지엔 CJK 폰트가 없을 수 있어서, 폰트 파일 자체를
+# 실행 파일과 함께 둔다. $<TARGET_FILE_DIR:...>를 써서 build/install 양쪽
+# 다 실행 파일이 실제로 있는 폴더로 복사되게 함(맥 MACOSX_BUNDLE이어도
+# .app/Contents/MacOS/ 안으로 정확히 맞춰짐 — 다만 맥은 시스템에 이미
+# 한글 폰트가 있어서 이 파일이 없어도 앱이 죽지는 않음, loadKoreanFont()의
+# 폴백 참고).
+#
+# 폰트 파일 자체(resources/fonts/NotoSansCJK-Regular.ttc)는 이 커밋에
+# 아직 없음 — Google Noto Fonts 공식 배포본을 받아 이 경로에 추가해야
+# 실제로 복사됨(없으면 COMMAND가 조용히 실패하지 않고 CMake 설정 단계
+# 에서 빌드가 멈추도록 존재 여부를 EXISTS로 먼저 확인).
+set(OTA_SYSTEM_FONT_FILE
+    ${CMAKE_CURRENT_SOURCE_DIR}/resources/fonts/NotoSansCJK-Regular.ttc)
+if(EXISTS ${OTA_SYSTEM_FONT_FILE})
+    add_custom_command(TARGET OTA_System POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${OTA_SYSTEM_FONT_FILE}
+            $<TARGET_FILE_DIR:OTA_System>/NotoSansCJK-Regular.ttc
+        COMMENT "한글 폰트를 실행 파일 옆으로 복사")
+    install(FILES ${OTA_SYSTEM_FONT_FILE}
+        DESTINATION ${CMAKE_INSTALL_BINDIR})
+else()
+    message(WARNING
+        "OTA_System: ${OTA_SYSTEM_FONT_FILE} 없음 — 한글 폰트 없이 빌드됨"
+        " (라즈베리파이에선 한글이 깨져 보일 수 있음, main.cpp의"
+        " loadKoreanFont() 참고). Google Noto Fonts에서 받아 추가하세요.")
+endif()
+
 install(TARGETS OTA_System
     BUNDLE  DESTINATION .
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
