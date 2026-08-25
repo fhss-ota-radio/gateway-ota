@@ -18,6 +18,8 @@ extern "C" {
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QLabel>
+#include <QStatusBar>
 #include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QRegularExpressionValidator>
@@ -81,12 +83,23 @@ OtaManager::OtaManager(QWidget *parent)
     // [2026-08-25] 창 제목(main.cpp)과 별개로 로그(=파일에도 자동 저장됨,
     // 위 m_logFile 주석 참고)에도 남겨서, GUI를 안 보고 로그 파일만 봐도
     // 어느 커밋으로 빌드됐는지 바로 확인 가능하게 함.
+    const QString versionText =
+        tr("%1%2 (%3)")
+            .arg(QStringLiteral(OTA_SYSTEM_GIT_HASH),
+                 OTA_SYSTEM_GIT_DIRTY ? QStringLiteral("-dirty") : QString(),
+                 QStringLiteral(OTA_SYSTEM_GIT_BRANCH));
     appendLog(QStringLiteral("INFO"),
-              tr("빌드 버전: %1%2 (%3), 빌드 시각: %4")
-                  .arg(QStringLiteral(OTA_SYSTEM_GIT_HASH),
-                       OTA_SYSTEM_GIT_DIRTY ? QStringLiteral("-dirty") : QString(),
-                       QStringLiteral(OTA_SYSTEM_GIT_BRANCH),
-                       QStringLiteral(OTA_SYSTEM_BUILD_TIMESTAMP)));
+              tr("빌드 버전: %1, 빌드 시각: %2")
+                  .arg(versionText, QStringLiteral(OTA_SYSTEM_BUILD_TIMESTAMP)));
+
+    // [2026-08-25] 창 제목(main.cpp의 setWindowTitle())은 라즈베리파이 VNC
+    // 화면(QT_QPA_PLATFORM=vnc, 윈도우 매니저 없는 헤드리스 방식)에서
+    // 제목표시줄 자체가 안 그려져서 안 보임 — OS 창틀이 아니라 화면
+    // "내용물" 안에 있어야 VNC에서도 보이므로, QMainWindow가 기본 제공하는
+    // 상태표시줄(statusBar(), otamanager.ui의 statusbar)에 상시 라벨로 띄움.
+    auto *versionLabel = new QLabel(tr("빌드: %1").arg(versionText), this);
+    statusBar()->addPermanentWidget(versionLabel);
+
     appendLog(QStringLiteral("INFO"), tr("화면 초기화 완료"));
 }
 
