@@ -68,7 +68,7 @@ void printUsage(const char *argv0)
     std::cerr << "사용법: " << argv0
               << " <device_path> <bin_file> <session_id_hex> <target_id_hex> "
                  "<generation> [channel_count=8] [first_channel=1] [seed_hex=0] "
-                 "[batchSize=5] [chunkDelayMs=40] [timeoutMs=300] [maxRetry=5]\n"
+                 "[batchSize=5] [chunkDelayMs=40] [timeoutMs=300] [maxRetry=20]\n"
               << "  예: " << argv0
               << " /dev/cc1101 firmware.bin 0x1 A29E60 1 8 1 0x46485353\n";
 }
@@ -78,16 +78,93 @@ void printUsage(const char *argv0)
 // 실기기 로그: 3개 SYNC 패킷 검증 후 SYNC_ACQUIRED, slot_duration_us=300000
 // 기준 약 0.9~1.2초). 그 전에 OTA_START를 보내면 ESP32가 아직 OTA_FHSS_READY가
 // 아니라서 응답이 없을 수 있으므로, 여유를 둬서 기다린다.
-constexpr int kSyncSettleMs = 2000;
+//
+// [2026-08-24 정정: 2000 -> 4000] 위 "0.9~1.2초"는 **첫 SYNC를 이미 잡은
+// 뒤부터** 재는 시간이었다. 실제로는 그 앞에 "첫 SYNC를 잡기까지"가
+// 따로 있고, 이게 훨씬 길다:
+//
+//   ESP32는 ACTIVATE 직후 랑데부 채널(=first_channel, 보통 1번)에 고정된
+//   채 SYNC를 기다린다. 그런데 Gateway는 이미 8채널을 순회 중이라 1번
+//   채널로 돌아오는 건 8슬롯마다 = 300ms x 8 = 2.4초에 한 번뿐이다.
+//   즉 첫 SYNC까지 최악 2.4초 + 획득까지 3슬롯 0.9초 = 최악 3.3초.
+//
+// 2000ms는 이 최악값보다 짧아서, ESP32가 아직 SEARCHING인 상태에서
+// OTA_START/DATA가 먼저 도착한다. 그러면 ESP32는 그 DATA를 처리하느라
+// 바로 다음 SYNC를 놓치는데, 아직 "획득 전"(SYNCHRONIZING) 단계라
+// 관용이 없어서 기준점을 통째로 버리고 랑데부 채널로 되돌아간다 —
+// 그럼 또 2.4초를 기다려야 하고, 그 사이 DATA는 계속 오므로 같은 일이
+// 반복되어 영영 TRACKING에 못 간다. 결국 ESP32의 5초 동기화 타임아웃
+// (firmware-esp32 main/fsm.c OTA_FHSS_SYNC_TIMEOUT_MS)이 먼저 터져
+// 세션이 폐기된다.
+//
+// 148 실기기 로그(2026-08-24)에서 이 교착이 정확히 재현됐고, 세션이
+// 폐기되어 DATA가 멈추자마자 300ms 만에 깨끗이 SYNC_ACQUIRED까지 간
+// 것이 결정적 증거였다. 상세: design-notes-gateway-ota-es.md 54절.
+//
+// 최악 3.3초 + 여유를 두어 4000ms로 올린다. ESP32 쪽 타임아웃도 5초 ->
+// 10초로 함께 올려서, 이 대기가 오히려 타임아웃을 유발하지 않게 했다.
+constexpr int kSyncSettleMs = 4000;
 constexpr int kSlotPollMs = 2;
 constexpr int kPostSyncGuardMs = 25;
 constexpr int kSlotGateTimeoutMs = 1200;
+// [2026-08-24 추가, perf/fhss-slot-batch-tx] 슬롯 하나당 패킷 하나씩만
+// 보내던 게 너무 느려서(슬롯 300ms마다 1개 = 7825청크면 40분 가까이) 같은
+// 슬롯 안에서 여러 개를 연달아 보내도록 바꿈. 앞쪽(kPostSyncGuardMs)은
+// 그대로 두고, 뒤쪽에도 이만큼(kTailGuardMs) 여유를 남겨서 다음 슬롯
+// 경계(=다음 SYNC 송신 시점)와 안 겹치게 함 — 아직 실기기로 잰 값이
+// 아니라 "합리적인 추정치"라서, 첫 실기기 테스트 로그(각 전송이 안전
+// 창의 몇 ms 지점에서 나갔는지)를 보고 좁혀나갈 것.
+constexpr int kTailGuardMs = 40;
+// [2026-08-24 추가] 같은 슬롯 안에서 연속으로 보낼 때 패킷 사이에 최소한
+// 이만큼은 띄운다.
+//
+// [왜 필요한가] CC1101은 반이중(half-duplex — 송신과 수신을 동시에 못 하는
+// 방식) 트랜시버 하나뿐이라, ESP32가 ACK를 송신하는 동안은 귀가 닫혀 있다.
+// 148 실기기 로그(2026-08-24, ESP32 fe7f96c)로 이 왕복 시간을 실측했다:
+//
+//   23185  RX DATA(seq=0)        DATA 도착
+//   23234  DATA accepted seq=0
+//   23248  TX ACK seq=0
+//   23306  TX_RESULT ch=1        ACK 송신 완료 -> 왕복 약 121ms
+//   23337  batch store seq=2, received=0x05   <- seq=1은 아예 못 받음
+//   23403  TX_RESULT (seq=2 ACK)
+//   23449  batch store seq=4, received=0x15   <- seq=3도 못 받음
+//
+// 위 실행에서 Gateway는 슬롯 하나에 5개를 16ms 간격으로 쐈는데(안전창
+// 재사용 최적화의 부작용), ESP32의 왕복이 121ms라서 ACK 송신 중에 지나간
+// 홀수 seq가 통째로 유실됐다 — missing_mask가 0x1A(=seq 1,3,4)로 고정되고
+// 재전송 한도를 넘겨 실패. "패킷을 촘촘히 보낼수록 오히려 덜 도착하는"
+// 상태였던 것.
+//
+// 실측 121ms에 여유를 얹어 150ms로 둔다. 안전창(슬롯 300ms -
+// kPostSyncGuardMs 25 - kTailGuardMs 40 = 235ms) 안에서는 슬롯당 2개가
+// 나가고, 나머지는 다음 슬롯 창으로 자연히 밀린다(batchSize와 무관하게
+// 동작 — 창이 닫히면 ensureSafeWindow()가 다음 슬롯을 기다림).
+// 상세: docs/note/design-notes-gateway-ota-es.md 55절.
+constexpr int kMinPacketGapMs = 150;
+// [2026-08-25 추가] 재동기화 양보(quiet window) 조건.
+//
+// kQuietTriggerSends: 연속으로 이만큼 보내는 동안 ACK/NACK를 하나도 못
+//   받으면 "ESP32가 SYNC를 잃고 재획득 중"이라고 판단한다. 정상 동작
+//   중에는 배치 5개를 다 보내기 전에 앞쪽 ACK가 돌아오므로 이 값까지
+//   올라가지 않는다(실기기 로그 기준 연속 무응답은 최대 5회 정도).
+//   8회 x 150ms = 약 1.2초 침묵이 트리거 조건.
+// kResyncQuietMs: 그때 완전히 입을 다무는 시간. ESP32의 최악 재획득
+//   시간(랑데부 복귀 2.4초 + 연속 3 SYNC 0.9초 = 3.3초)에 여유를 얹음.
+//   ESP32의 재동기화 유예 10초보다는 충분히 짧아야 한다(그 안에 복구가
+//   끝나야 세션이 살아있으므로).
+constexpr int kQuietTriggerSends = 8;
+constexpr int kResyncQuietMs = 4000;
 
 class SlotAwareTransport final : public ITransport
 {
 public:
-    SlotAwareTransport(Cc1101Transport &transport, uint32_t generation)
-        : m_transport(transport), m_generation(generation)
+    // slotDurationUs: FhssHopPolicy::slotDurationUs를 그대로 받음 — 안전
+    // 창이 이번 슬롯 안에서 아직 안 닫혔는지 판단하려면 슬롯 길이를 알아야
+    // 하는데, 예전엔 이 클래스가 몰라도 됐음(매번 다음 슬롯을 기다렸으니까).
+    SlotAwareTransport(Cc1101Transport &transport, uint32_t generation, uint32_t slotDurationUs)
+        : m_transport(transport), m_generation(generation),
+          m_slotDurationMs(static_cast<int64_t>(slotDurationUs) / 1000)
     {
     }
 
@@ -97,6 +174,132 @@ public:
 
     bool send(const std::vector<uint8_t> &packet) override
     {
+        if (!ensureSafeWindow())
+            return false;
+
+        const uint8_t type = packet.empty() ? 0 : packet.front();
+        const int64_t elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - m_windowOpenedAt).count();
+        std::cout << "[fhss_ota][slot_tx] type=" << static_cast<unsigned>(type)
+                  << " slot=" << m_openWindowSlot
+                  << " window_elapsed_ms=" << elapsedMs << "\n";
+
+        const bool ok = m_transport.send(packet);
+        if (!ok) {
+            // 실패했으면 이 창을 더 이상 못 믿음(예: 그 사이 동기화가
+            // 깨졌을 수도 있음) — 다음 send() 호출은 처음부터 다시 게이팅.
+            m_openWindowSlot = kNoWindow;
+        } else {
+            m_lastSentAt = std::chrono::steady_clock::now();
+            ++m_sendsSinceLastRx;
+        }
+        return ok;
+    }
+
+    // 무엇이든 하나라도 받으면 "상대가 살아있다"는 뜻이므로 침묵 카운터를
+    // 리셋한다. OtaSession이 이 함수를 아주 자주 폴링하고 대부분 빈 벡터를
+    // 돌려받으므로, 빈 결과로는 리셋하지 않는다.
+    std::vector<uint8_t> recv() override
+    {
+        auto packet = m_transport.recv();
+        if (!packet.empty())
+            m_sendsSinceLastRx = 0;
+        return packet;
+    }
+
+private:
+    static constexpr uint64_t kNoWindow = ~static_cast<uint64_t>(0);
+
+    bool usable(const Cc1101FhssStatus &status) const
+    {
+        return status.enabled && status.synchronized &&
+               status.role == static_cast<uint8_t>(Cc1101FhssRole::Master) &&
+               status.generation == m_generation && status.lastError == 0;
+    }
+
+    static void logGateFailure(const char *where, const Cc1101FhssStatus &status)
+    {
+        std::cerr << "[fhss_ota][slot_tx] " << where
+                  << " enabled=" << status.enabled
+                  << " synchronized=" << status.synchronized
+                  << " role=" << static_cast<unsigned>(status.role)
+                  << " generation=" << status.generation
+                  << " slot=" << status.currentSlot
+                  << " error=" << status.lastError << "\n";
+    }
+
+    // 지금 바로 send()해도 안전한 상태인지 확인한다.
+    //
+    // 이미 이번 슬롯에서 안전 창을 열어둔 상태(직전 send()가 같은 슬롯에서
+    // 성공)라면, 그 창이 아직 안 닫혔는지(같은 슬롯 + 뒤쪽 여유 충분)만
+    // 빠르게 확인하고 대기 없이 바로 통과시킨다 — 이게 "슬롯당 여러 개"의
+    // 핵심. 창이 없거나 이미 닫혔으면 예전 방식 그대로 다음 슬롯 경계까지
+    // 기다렸다가 새 창을 연다.
+    bool ensureSafeWindow()
+    {
+        // [2026-08-25 추가] 재동기화 양보(quiet window).
+        //
+        // [왜 필요한가] 54절에서 고친 "동기화 전에 DATA를 쏘면 그 DATA가
+        // 동기화를 막는" 교착은 전송 시작 시점만의 문제가 아니었다. 전송
+        // 도중 ESP32가 SYNC를 잃으면 똑같이 랑데부 채널로 돌아가 재획득을
+        // 시도하는데(최악 3.3초), 그동안 Gateway는 아무것도 모른 채
+        // kMinPacketGapMs(150ms)마다 재전송을 계속 쏜다. 그 DATA가 다시
+        // SYNC 수신을 밀어내서, ESP32는 10초 유예 안에 복구하지 못하고
+        // 세션을 버린다. 그 뒤로는 Gateway가 재전송 한도를 아무리 늘려도
+        // 이미 세션이 없는 상대에게 쏘는 것이라 소용이 없다.
+        //   (148 실기기 2026-08-24: 1036청크에서 12.6초 완전 무응답 후 실패.
+        //    ESP32 유예 10초 < Gateway 12.6초이므로 ESP32가 먼저 포기한 것.)
+        //
+        // 그래서 "일정 횟수 연속으로 아무 응답도 못 받으면" 잠시 완전히
+        // 입을 다물어 ESP32가 방해 없이 SYNC를 다시 잡을 시간을 준다.
+        // 이 조용한 구간이 곧 54절 수정(kSyncSettleMs)의 전송 중 버전이다.
+        // 상세: docs/note/design-notes-gateway-ota-es.md 58절.
+        if (m_sendsSinceLastRx >= kQuietTriggerSends) {
+            std::cout << "[fhss_ota][slot_tx] " << m_sendsSinceLastRx
+                       << "회 연속 무응답 — ESP32 재동기화를 위해 "
+                       << kResyncQuietMs << "ms 동안 송신 중단\n";
+            std::this_thread::sleep_for(std::chrono::milliseconds(kResyncQuietMs));
+            m_sendsSinceLastRx = 0;
+            // 조용히 있는 사이 슬롯이 여러 번 바뀌었으므로 창은 무효.
+            m_openWindowSlot = kNoWindow;
+        }
+
+        // [2026-08-24 추가] 반이중 왕복 보호 — 직전 전송 이후
+        // kMinPacketGapMs가 안 지났으면 그만큼 기다린다. ESP32가 직전
+        // DATA의 ACK를 송신하는 동안은 수신을 못 하므로, 이걸 안 지키면
+        // 그 사이에 보낸 패킷이 통째로 유실된다(상단 kMinPacketGapMs
+        // 주석의 실측 로그 참고). 창이 살아있는 경로/새 창을 여는 경로
+        // 둘 다에 적용돼야 하므로 함수 맨 앞에 둔다 — 새 창을 여는
+        // 경로는 어차피 슬롯 경계까지 기다리느라 이 간격이 자연히
+        // 확보되지만, 명시적으로 보장해두는 편이 안전하다.
+        if (m_lastSentAt.time_since_epoch().count() != 0) {
+            for (;;) {
+                const int64_t sinceLastMs =
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - m_lastSentAt).count();
+                if (sinceLastMs >= kMinPacketGapMs)
+                    break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(kSlotPollMs));
+            }
+        }
+
+        if (m_openWindowSlot != kNoWindow) {
+            const auto status = m_transport.getFhssStatus();
+            const int64_t elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - m_windowOpenedAt).count();
+            // 창이 열린 시각(m_windowOpenedAt)은 대략 "슬롯 경계 + kPostSyncGuardMs"
+            // 지점이므로, 다음 슬롯 경계까지 남은 시간 ≈
+            // m_slotDurationMs - kPostSyncGuardMs - elapsedMs. 이게
+            // kTailGuardMs 이상 남아있어야 새로 보내도 안전하다고 봄.
+            const bool stillSameSlot = usable(status) && status.currentSlot == m_openWindowSlot;
+            const bool stillHasRoom =
+                elapsedMs + kTailGuardMs < m_slotDurationMs - kPostSyncGuardMs;
+            if (stillSameSlot && stillHasRoom)
+                return true; // 대기 없이 통과 — 슬롯당 여러 개 보내지는 지점
+
+            m_openWindowSlot = kNoWindow; // 창 닫힘(슬롯 바뀜/여유 부족/동기화 깨짐) -> 새로 게이팅
+        }
+
         const auto deadline = std::chrono::steady_clock::now()
             + std::chrono::milliseconds(kSlotGateTimeoutMs);
         auto status = m_transport.getFhssStatus();
@@ -122,12 +325,12 @@ public:
             if (!usable(verified) || verified.currentSlot != sendSlot)
                 continue;
 
-            const uint8_t type = packet.empty() ? 0 : packet.front();
-            std::cout << "[fhss_ota][slot_tx] type=" << static_cast<unsigned>(type)
-                      << " slot=" << sendSlot
+            m_openWindowSlot = sendSlot;
+            m_windowOpenedAt = std::chrono::steady_clock::now();
+            std::cout << "[fhss_ota][slot_tx] new window slot=" << sendSlot
                       << " channel=" << static_cast<unsigned>(verified.currentChannel)
                       << " post_sync_ms=" << kPostSyncGuardMs << "\n";
-            return m_transport.send(packet);
+            return true;
         }
 
         std::cerr << "[fhss_ota][slot_tx] safe slot timeout after "
@@ -135,29 +338,16 @@ public:
         return false;
     }
 
-    std::vector<uint8_t> recv() override { return m_transport.recv(); }
-
-private:
-    bool usable(const Cc1101FhssStatus &status) const
-    {
-        return status.enabled && status.synchronized &&
-               status.role == static_cast<uint8_t>(Cc1101FhssRole::Master) &&
-               status.generation == m_generation && status.lastError == 0;
-    }
-
-    static void logGateFailure(const char *where, const Cc1101FhssStatus &status)
-    {
-        std::cerr << "[fhss_ota][slot_tx] " << where
-                  << " enabled=" << status.enabled
-                  << " synchronized=" << status.synchronized
-                  << " role=" << static_cast<unsigned>(status.role)
-                  << " generation=" << status.generation
-                  << " slot=" << status.currentSlot
-                  << " error=" << status.lastError << "\n";
-    }
-
     Cc1101Transport &m_transport;
     uint32_t m_generation;
+    int64_t m_slotDurationMs;
+    uint64_t m_openWindowSlot = kNoWindow;
+    std::chrono::steady_clock::time_point m_windowOpenedAt{};
+    // 기본 생성된 time_point는 epoch(=count() 0)이므로, "아직 한 번도 안
+    // 보냄"을 별도 bool 없이 이걸로 구분한다(ensureSafeWindow() 참고).
+    std::chrono::steady_clock::time_point m_lastSentAt{};
+    // 마지막으로 뭔가 수신한 이후 보낸 패킷 수 — 재동기화 양보 판단용.
+    int m_sendsSinceLastRx = 0;
 };
 
 } // namespace
@@ -198,7 +388,20 @@ int main(int argc, char *argv[])
     const int batchSize = (argc >= 10) ? std::atoi(argv[9]) : 5;
     const int chunkDelayMs = (argc >= 11) ? std::atoi(argv[10]) : 40;
     const int timeoutMs = (argc >= 12) ? std::atoi(argv[11]) : 300;
-    const int maxRetry = (argc >= 13) ? std::atoi(argv[12]) : 5;
+    // [2026-08-24 정정: 기본값 5 -> 20] ESP32가 전송 중 SYNC를 잃으면
+    // 랑데부 채널로 돌아가 재동기화하는 데 최악 3.3초가 걸린다(랑데부
+    // 복귀 주기 2.4초 + 연속 3 SYNC 0.9초). 그동안 ESP32는 DATA를 전혀
+    // 못 받으므로 Gateway 입장에선 그냥 타임아웃이 연속으로 나는 걸로만
+    // 보인다. 재전송 한 번이 대략 150~300ms(슬롯 게이팅 + timeoutMs)라
+    // 5회로는 1초 남짓밖에 못 버텨서, ESP32가 복구되기 전에 Gateway가
+    // 먼저 포기해버린다.
+    //
+    // ESP32 쪽 재동기화 유예도 10초로 맞춰뒀으므로(firmware-esp32
+    // main/fsm.c OTA_FHSS_RESYNC_GRACE_MS), Gateway도 그 시간 동안은
+    // 버티도록 20회로 올린다. 진짜로 연결이 끊긴 경우엔 20회를 다 쓰고
+    // 실패하므로 무한 대기가 되지는 않는다.
+    // 상세: docs/note/design-notes-gateway-ota-es.md 56절.
+    const int maxRetry = (argc >= 13) ? std::atoi(argv[12]) : 20;
 
     std::cout << "[fhss_ota] device=" << devicePath << " file=" << binFile
                << " session_id=0x" << std::hex << sessionId
@@ -296,7 +499,7 @@ int main(int argc, char *argv[])
     // smoke_session_send_main.cpp와 동일한 사용법 — transport.send()/recv()는
     // 지금이 어느 채널이든 그대로 동작한다(커널이 채널 전환을 알아서 함).
     std::cout << "[fhss_ota] 4단계: OtaSession으로 파일 전송 시작...\n";
-    SlotAwareTransport slotAwareTransport(transport, generation);
+    SlotAwareTransport slotAwareTransport(transport, generation, policy.slotDurationUs);
     if (chunkDelayMs != 0) {
         std::cout << "[fhss_ota] slot-aware TX가 패킷 간격을 소유하므로 chunkDelayMs="
                   << chunkDelayMs << "는 사용하지 않습니다.\n";
