@@ -142,6 +142,19 @@ constexpr int kTailGuardMs = 40;
 // 동작 — 창이 닫히면 ensureSafeWindow()가 다음 슬롯을 기다림).
 // 상세: docs/note/design-notes-gateway-ota-es.md 55절.
 constexpr int kMinPacketGapMs = 150;
+// [2026-08-25 추가] 재동기화 양보(quiet window) 조건.
+//
+// kQuietTriggerSends: 연속으로 이만큼 보내는 동안 ACK/NACK를 하나도 못
+//   받으면 "ESP32가 SYNC를 잃고 재획득 중"이라고 판단한다. 정상 동작
+//   중에는 배치 5개를 다 보내기 전에 앞쪽 ACK가 돌아오므로 이 값까지
+//   올라가지 않는다(실기기 로그 기준 연속 무응답은 최대 5회 정도).
+//   8회 x 150ms = 약 1.2초 침묵이 트리거 조건.
+// kResyncQuietMs: 그때 완전히 입을 다무는 시간. ESP32의 최악 재획득
+//   시간(랑데부 복귀 2.4초 + 연속 3 SYNC 0.9초 = 3.3초)에 여유를 얹음.
+//   ESP32의 재동기화 유예 10초보다는 충분히 짧아야 한다(그 안에 복구가
+//   끝나야 세션이 살아있으므로).
+constexpr int kQuietTriggerSends = 8;
+constexpr int kResyncQuietMs = 4000;
 
 class SlotAwareTransport final : public ITransport
 {
@@ -178,11 +191,21 @@ public:
             m_openWindowSlot = kNoWindow;
         } else {
             m_lastSentAt = std::chrono::steady_clock::now();
+            ++m_sendsSinceLastRx;
         }
         return ok;
     }
 
-    std::vector<uint8_t> recv() override { return m_transport.recv(); }
+    // 무엇이든 하나라도 받으면 "상대가 살아있다"는 뜻이므로 침묵 카운터를
+    // 리셋한다. OtaSession이 이 함수를 아주 자주 폴링하고 대부분 빈 벡터를
+    // 돌려받으므로, 빈 결과로는 리셋하지 않는다.
+    std::vector<uint8_t> recv() override
+    {
+        auto packet = m_transport.recv();
+        if (!packet.empty())
+            m_sendsSinceLastRx = 0;
+        return packet;
+    }
 
 private:
     static constexpr uint64_t kNoWindow = ~static_cast<uint64_t>(0);
@@ -214,6 +237,33 @@ private:
     // 기다렸다가 새 창을 연다.
     bool ensureSafeWindow()
     {
+        // [2026-08-25 추가] 재동기화 양보(quiet window).
+        //
+        // [왜 필요한가] 54절에서 고친 "동기화 전에 DATA를 쏘면 그 DATA가
+        // 동기화를 막는" 교착은 전송 시작 시점만의 문제가 아니었다. 전송
+        // 도중 ESP32가 SYNC를 잃으면 똑같이 랑데부 채널로 돌아가 재획득을
+        // 시도하는데(최악 3.3초), 그동안 Gateway는 아무것도 모른 채
+        // kMinPacketGapMs(150ms)마다 재전송을 계속 쏜다. 그 DATA가 다시
+        // SYNC 수신을 밀어내서, ESP32는 10초 유예 안에 복구하지 못하고
+        // 세션을 버린다. 그 뒤로는 Gateway가 재전송 한도를 아무리 늘려도
+        // 이미 세션이 없는 상대에게 쏘는 것이라 소용이 없다.
+        //   (148 실기기 2026-08-24: 1036청크에서 12.6초 완전 무응답 후 실패.
+        //    ESP32 유예 10초 < Gateway 12.6초이므로 ESP32가 먼저 포기한 것.)
+        //
+        // 그래서 "일정 횟수 연속으로 아무 응답도 못 받으면" 잠시 완전히
+        // 입을 다물어 ESP32가 방해 없이 SYNC를 다시 잡을 시간을 준다.
+        // 이 조용한 구간이 곧 54절 수정(kSyncSettleMs)의 전송 중 버전이다.
+        // 상세: docs/note/design-notes-gateway-ota-es.md 58절.
+        if (m_sendsSinceLastRx >= kQuietTriggerSends) {
+            std::cout << "[fhss_ota][slot_tx] " << m_sendsSinceLastRx
+                       << "회 연속 무응답 — ESP32 재동기화를 위해 "
+                       << kResyncQuietMs << "ms 동안 송신 중단\n";
+            std::this_thread::sleep_for(std::chrono::milliseconds(kResyncQuietMs));
+            m_sendsSinceLastRx = 0;
+            // 조용히 있는 사이 슬롯이 여러 번 바뀌었으므로 창은 무효.
+            m_openWindowSlot = kNoWindow;
+        }
+
         // [2026-08-24 추가] 반이중 왕복 보호 — 직전 전송 이후
         // kMinPacketGapMs가 안 지났으면 그만큼 기다린다. ESP32가 직전
         // DATA의 ACK를 송신하는 동안은 수신을 못 하므로, 이걸 안 지키면
@@ -296,6 +346,8 @@ private:
     // 기본 생성된 time_point는 epoch(=count() 0)이므로, "아직 한 번도 안
     // 보냄"을 별도 bool 없이 이걸로 구분한다(ensureSafeWindow() 참고).
     std::chrono::steady_clock::time_point m_lastSentAt{};
+    // 마지막으로 뭔가 수신한 이후 보낸 패킷 수 — 재동기화 양보 판단용.
+    int m_sendsSinceLastRx = 0;
 };
 
 } // namespace
