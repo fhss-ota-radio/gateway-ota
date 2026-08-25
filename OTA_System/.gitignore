@@ -24,6 +24,12 @@ tags
 .directory
 *.debug
 Makefile*
+# [2026-08-25] Makefile.pi는 qmake/cmake가 자동 생성하는 빌드 산출물이
+# 아니라, Qt/cmake가 없는 라즈베리파이(욕토 이미지)용으로 사람이 직접 짠
+# 대체 빌드 스크립트다(Makefile.pi 파일 상단 주석 참고). 위 "Makefile*"
+# 패턴에 걸려 지금까지 커밋된 적이 없어서, 파이에서 git pull로 못 받고
+# 매번 맥에서 scp로 수동 복사해야 했다 — 명시적으로 예외 처리.
+!Makefile.pi
 *.prl
 *.app
 moc_*.cpp

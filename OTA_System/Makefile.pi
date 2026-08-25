@@ -1,0 +1,156 @@
+# =====================================================================
+# OTA_System/Makefile.pi — Qt 없는 라즈베리파이(욕토 이미지)용 대체 빌드
+# =====================================================================
+# 왜 필요한가:
+#   CMakeLists.txt 6행 find_package(Qt6 ... REQUIRED)가 있어서, cmake
+#   "설정(configure)" 단계 자체가 Qt6이 없으면 무조건 실패합니다.
+#   파이는 욕토(Yocto — 임베디드 리눅스 배포판을 커스텀으로 찍어내는
+#   빌드 시스템, 완성된 파이에서 뭘 못 하게 막는 도구가 아니라 "이미지에
+#   뭘 넣을지"를 정하는 도구)로 만든 최소 구성 이미지라, Qt6은 물론
+#   cmake 자체도 기본으로는 없습니다. 그래서 cmake를 파이에 새로 깐다
+#   해도 이 CMakeLists.txt는 Qt6이 없는 한 여전히 못 씁니다.
+#
+#   ota_core(core/·session/·transport/)는 애초에 Qt 타입을 안 쓰도록
+#   설계돼 있어서(design-notes-gateway-ota-es.md 14절, "core/transport가
+#   Qt 의존성 없는 이유") g++ + make(GNU Make)만으로 완전히 빌드
+#   가능합니다. make는 커널 빌드 등에도 쓰이는 기본 도구라 욕토 최소
+#   이미지에도 보통 포함되어 있어서(g++도 이미 확인됨), cmake 없이
+#   이 Makefile로 실기기 스모크테스트 CLI들을 빌드합니다.
+#
+# 유지 방법:
+#   CMakeLists.txt에 add_executable() 블록이 새로 생기면(단, Qt 링크가
+#   없는 것만), 이 Makefile에도 대응하는 항목을 하나 추가해주세요.
+#   각 그룹 위에 "CMakeLists.txt N행 대응" 주석을 남겨뒀습니다.
+#   qt_add_executable(OTA_System ...)로 만든 GUI 앱 자체는 Qt가
+#   필요해서 이 Makefile 대상이 아닙니다 — 파이에서는 애초에 GUI 앱을
+#   못 띄우므로(디스플레이 없음) 원래도 스모크테스트 CLI만 필요합니다.
+#
+# 사용법 (파이에서):
+#   cd OTA_System
+#   make -f Makefile.pi                    # 전부 빌드 (스모크+유닛+spidev)
+#   make -f Makefile.pi smoke              # 실기기 스모크테스트 CLI만
+#   make -f Makefile.pi ota_smoke_fhss_ota_transfer   # 하나만
+#   make -f Makefile.pi clean              # build-pi/ 통째로 삭제
+#   make -f Makefile.pi OTA_PROTOCOL_INCLUDE_DIR=/다른/경로/include
+#       # ota-protocol이 "같은 상위 폴더"에 없을 때 직접 경로 지정
+# =====================================================================
+
+CXX ?= g++
+CXXFLAGS ?= -std=c++17 -O2 -Wall -Wextra -Wno-psabi
+# -Wno-psabi 이유: GCC 7.1+ ARM에서 뜨는 "parameter passing for argument
+# of type ... changed in GCC 7.1" note는 에러도 경고도 아닌 정보성 메시지
+# — 같은 GCC로 전체를 컴파일·링크하면 문제없음 (design-notes 참고).
+
+# gateway-ota와 같은 상위 폴더에 ota-protocol이 나란히 있다고 가정
+# (CMakeLists.txt의 OTA_PROTOCOL_INCLUDE_DIR 기본값과 동일한 규칙).
+OTA_PROTOCOL_INCLUDE_DIR ?= ../../ota-protocol/include
+
+INCLUDES := -I. -Icore -Itransport -Isession -I$(OTA_PROTOCOL_INCLUDE_DIR)
+
+BUILD_DIR := build-pi
+
+# ---------- ota_core 정적 라이브러리 (CMakeLists.txt 50~69행 대응) ----------
+CORE_SRCS := \
+	core/binsplitter.cpp \
+	core/sha256.cpp \
+	session/simplesender.cpp \
+	session/simplereceiver.cpp \
+	session/otasession.cpp \
+	session/discovery.cpp \
+	session/fhssrollout.cpp \
+	transport/cc1101transport.cpp \
+	transport/slotawaretransport.cpp
+
+CORE_OBJS := $(patsubst %.cpp,$(BUILD_DIR)/%.o,$(CORE_SRCS))
+CORE_LIB  := $(BUILD_DIR)/libota_core.a
+
+# ---------- 실기기 스모크테스트 CLI (CMakeLists.txt 176~260행 대응) ----------
+# /dev/cc1101이 실제로 있어야 동작 — 파이에서 사람이 직접 실행하는 용도.
+SMOKE_BINS := \
+	ota_smoke_send \
+	ota_smoke_recv \
+	ota_smoke_session_send \
+	ota_smoke_bad_data \
+	ota_smoke_discover \
+	ota_smoke_discover_session_send \
+	ota_smoke_fhss_activate \
+	ota_smoke_fhss_ota_transfer
+
+ota_smoke_send_SRC                  := tests/smoke_send_main.cpp
+ota_smoke_recv_SRC                  := tests/smoke_recv_main.cpp
+ota_smoke_session_send_SRC          := tests/smoke_session_send_main.cpp
+ota_smoke_bad_data_SRC              := tests/smoke_bad_data_main.cpp
+ota_smoke_discover_SRC              := tests/smoke_discover_main.cpp
+ota_smoke_discover_session_send_SRC := tests/smoke_discover_session_send_main.cpp
+ota_smoke_fhss_activate_SRC         := tests/smoke_fhss_activate_main.cpp
+ota_smoke_fhss_ota_transfer_SRC     := tests/smoke_fhss_ota_transfer_main.cpp
+
+# ---------- 유닛테스트 — 실기기 불필요, ctest 대응 (CMakeLists.txt 108~171행) ----------
+# 실기기 없이도 로직만 검증하는 것들이라 원래 목적은 Mac에서 ctest로
+# 돌리는 것이지만, 파이(ARM) 툴체인에서만 나는 버그가 있을 수 있어 여기도
+# 포함해둠 — 안 써도 무방.
+UNIT_BINS := \
+	ota_core_tests \
+	ota_session_tests \
+	ota_receiver_tests \
+	ota_discovery_tests \
+	ota_fhssrollout_tests
+
+ota_core_tests_SRC        := tests/tst_binsplitter.cpp
+ota_session_tests_SRC     := tests/tst_otasession.cpp
+ota_receiver_tests_SRC    := tests/tst_simplereceiver.cpp
+ota_discovery_tests_SRC   := tests/tst_discovery.cpp
+ota_fhssrollout_tests_SRC := tests/tst_fhssrollout.cpp
+
+# ---------- SpidevTransport 진단 도구 (CMakeLists.txt 262~299행 대응) ----------
+# ota_core에 안 들어있고 별도 include 경로(tools/spidev)가 필요해서 분리.
+SPIDEV_BINS := ota_smoke_spidev_send ota_smoke_spidev_recv
+SPIDEV_INCLUDES := $(INCLUDES) -Itools/spidev
+SPIDEV_EXTRA_SRC := tools/spidev/spidevtransport.cpp
+
+ota_smoke_spidev_send_SRC := tools/spidev/smoke_spidev_send_main.cpp
+ota_smoke_spidev_recv_SRC := tools/spidev/smoke_spidev_recv_main.cpp
+
+.PHONY: all clean smoke unit spidev
+all: smoke unit spidev
+smoke: $(addprefix $(BUILD_DIR)/,$(SMOKE_BINS))
+unit:  $(addprefix $(BUILD_DIR)/,$(UNIT_BINS))
+spidev: $(addprefix $(BUILD_DIR)/,$(SPIDEV_BINS))
+
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)/core $(BUILD_DIR)/session $(BUILD_DIR)/transport $(BUILD_DIR)/tools/spidev
+
+# ---------- ota_core 오브젝트/정적 라이브러리 ----------
+$(BUILD_DIR)/%.o: %.cpp | $(BUILD_DIR)
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(CORE_LIB): $(CORE_OBJS)
+	ar rcs $@ $^
+
+# ---------- 스모크테스트 CLI + 유닛테스트: 공통 링크 규칙 ----------
+# eval+call로 SMOKE_BINS/UNIT_BINS 각각에 대해 "이름_SRC" 변수를 참조하는
+# 규칙을 찍어냄 (GNU Make 매뉴얼의 "per-target variable" eval 패턴과 동일).
+define BUILD_BIN
+$(BUILD_DIR)/$(1): $$($(1)_SRC) $(CORE_LIB) | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $$($(1)_SRC) $(CORE_LIB) -o $$@
+endef
+$(foreach bin,$(SMOKE_BINS) $(UNIT_BINS),$(eval $(call BUILD_BIN,$(bin))))
+
+# ---------- spidev 도구: include 경로·추가 소스가 달라서 별도 규칙 ----------
+define BUILD_SPIDEV_BIN
+$(BUILD_DIR)/$(1): $$($(1)_SRC) $(SPIDEV_EXTRA_SRC) $(CORE_LIB) | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(SPIDEV_INCLUDES) $$($(1)_SRC) $(SPIDEV_EXTRA_SRC) $(CORE_LIB) -o $$@
+endef
+$(foreach bin,$(SPIDEV_BINS),$(eval $(call BUILD_SPIDEV_BIN,$(bin))))
+
+# ---------- 짧은 이름 별칭 ----------
+# 위 규칙들은 전부 $(BUILD_DIR)/이름(예: build-pi/ota_smoke_fhss_ota_transfer)
+# 으로만 만들어지므로, "make -f Makefile.pi ota_smoke_fhss_ota_transfer"처럼
+# 짧은 이름으로 바로 부를 수 있게 통과시키는 별칭 규칙. .PHONY로 선언해서
+# 혹시 현재 디렉터리에 같은 이름 파일이 있어도 항상 다시 확인하게 함.
+.PHONY: $(SMOKE_BINS) $(UNIT_BINS) $(SPIDEV_BINS)
+$(SMOKE_BINS) $(UNIT_BINS) $(SPIDEV_BINS): %: $(BUILD_DIR)/%
+
+clean:
+	rm -rf $(BUILD_DIR)
