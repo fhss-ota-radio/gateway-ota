@@ -292,12 +292,37 @@ private:
             // m_slotDurationMs - kPostSyncGuardMs - elapsedMs. 이게
             // kTailGuardMs 이상 남아있어야 새로 보내도 안전하다고 봄.
             const bool stillSameSlot = usable(status) && status.currentSlot == m_openWindowSlot;
-            const bool stillHasRoom =
-                elapsedMs + kTailGuardMs < m_slotDurationMs - kPostSyncGuardMs;
-            if (stillSameSlot && stillHasRoom)
-                return true; // 대기 없이 통과 — 슬롯당 여러 개 보내지는 지점
+            if (stillSameSlot) {
+                const bool stillHasRoom =
+                    elapsedMs + kTailGuardMs < m_slotDurationMs - kPostSyncGuardMs;
+                if (stillHasRoom)
+                    return true; // 대기 없이 통과 — 슬롯당 여러 개 보내지는 지점
 
-            m_openWindowSlot = kNoWindow; // 창 닫힘(슬롯 바뀜/여유 부족/동기화 깨짐) -> 새로 게이팅
+                m_openWindowSlot = kNoWindow; // 같은 슬롯인데 여유 없음 -> 이 슬롯은 진짜 끝
+            } else if (usable(status)) {
+                // [2026-08-25 추가, perf/fhss-slot-gap-tuning] 66절에서 찾은
+                // "격슬롯 스킵" 버그의 핵심 수정.
+                //
+                // [왜 스킵됐었나] kMinPacketGapMs(150ms) 대기 때문에, 이
+                // 슬롯의 2번째 패킷(~150ms 지점)을 보내고 3번째를 보내려는
+                // 시점(~300ms 지점)에는 이미 슬롯 경계를 막 넘긴 뒤였다.
+                // 예전 코드는 이 경우 "슬롯이 바뀌었다"만 확인하고 창을
+                // 버린 뒤, 아래 폴백 루프의 baselineSlot을 "방금 넘어온
+                // 그 새 슬롯"으로 잡아버렸다 — 그러면 루프는 그 슬롯이
+                // "또 바뀌기"를 기다리므로, 방금 막 시작된 다음 슬롯 전체를
+                // 한 번도 못 써보고 그다음 슬롯까지 흘려보냈다.
+                // (실측: gw_log 6613개 윈도우 전환 중 100%가 +2 — 절대
+                // +1이 없었다. design-notes 66절.)
+                //
+                // [수정] 여기서 "슬롯이 바뀐 걸 방금 발견했다"는 사실 자체가
+                // 곧 "새 슬롯이 막 시작했다"는 뜻이므로, 폴백 루프로 넘기지
+                // 않고 이 자리에서 바로 그 슬롯을 새 창으로 채택한다.
+                if (adoptWindow(status.currentSlot))
+                    return true;
+                m_openWindowSlot = kNoWindow;
+            } else {
+                m_openWindowSlot = kNoWindow; // 동기화 자체가 깨짐 -> 새로 게이팅
+            }
         }
 
         const auto deadline = std::chrono::steady_clock::now()
@@ -308,7 +333,7 @@ private:
             return false;
         }
 
-        const uint64_t baselineSlot = status.currentSlot;
+        uint64_t baselineSlot = status.currentSlot;
         while (std::chrono::steady_clock::now() < deadline) {
             std::this_thread::sleep_for(std::chrono::milliseconds(kSlotPollMs));
             status = m_transport.getFhssStatus();
@@ -319,23 +344,34 @@ private:
             if (status.currentSlot == baselineSlot)
                 continue;
 
-            const uint64_t sendSlot = status.currentSlot;
-            std::this_thread::sleep_for(std::chrono::milliseconds(kPostSyncGuardMs));
-            const auto verified = m_transport.getFhssStatus();
-            if (!usable(verified) || verified.currentSlot != sendSlot)
-                continue;
-
-            m_openWindowSlot = sendSlot;
-            m_windowOpenedAt = std::chrono::steady_clock::now();
-            std::cout << "[fhss_ota][slot_tx] new window slot=" << sendSlot
-                      << " channel=" << static_cast<unsigned>(verified.currentChannel)
-                      << " post_sync_ms=" << kPostSyncGuardMs << "\n";
-            return true;
+            if (adoptWindow(status.currentSlot))
+                return true;
+            // 채택 실패(가드 대기 중 슬롯이 또 넘어감 등) -> baseline을
+            // 갱신하지 않고 계속 대기하면 다음 루프에서 곧바로 최신 슬롯을
+            // 다시 채택 시도하게 된다(예전 동작과 동일하게 유지).
         }
 
         std::cerr << "[fhss_ota][slot_tx] safe slot timeout after "
                   << kSlotGateTimeoutMs << "ms\n";
         return false;
+    }
+
+    // status.currentSlot을 새 안전 창으로 채택한다 — kPostSyncGuardMs만큼
+    // 대기해 슬롯 경계가 흔들리지 않는지 재확인한 뒤에만 연다. 실패하면
+    // 창을 열지 않고 false만 반환(호출부가 폴백 루프로 계속 진행).
+    bool adoptWindow(uint64_t slot)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(kPostSyncGuardMs));
+        const auto verified = m_transport.getFhssStatus();
+        if (!usable(verified) || verified.currentSlot != slot)
+            return false;
+
+        m_openWindowSlot = slot;
+        m_windowOpenedAt = std::chrono::steady_clock::now();
+        std::cout << "[fhss_ota][slot_tx] new window slot=" << slot
+                  << " channel=" << static_cast<unsigned>(verified.currentChannel)
+                  << " post_sync_ms=" << kPostSyncGuardMs << "\n";
+        return true;
     }
 
     Cc1101Transport &m_transport;
