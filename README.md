@@ -61,6 +61,40 @@ OTA 매니저 Qt/C++ 앱(BIN 분할·전송·재전송).
 > 있었음). `kernel-cc1101-spi/cc1101_core.c`의 `cc1101_default_regs[]`와
 > **같은 값이어야** 통신됩니다.
 
+> **✅ (2026-08-25) 실기기 FHSS 호핑 중 OTA 전송 전량 완주 확인**
+> (`perf/fhss-slot-batch-tx`, 148에서 7949/7949·7825/7825 두 차례 완주,
+> SHA256 검증까지는 아직이나 END ACK 기준 무결성 확인). **다만 비호핑
+> 대비 처리량이 약 5.8배 느림** — 원인은 "슬롯 하나에 2패킷만 들어가고
+> 그다음 슬롯은 통째로 건너뛰는" 구조적 낭비로 규명됨(실측: 윈도우 전환
+> 6000개 이상 전수조사, 100%가 +2).
+>
+> 이 문제를 고치려 만든 `perf/fhss-slot-gap-tuning` 브랜치의 수정은
+> **실기기 재검증으로 효과 확인됨** — 진단 로그(`via`/`adopt_elapsed_ms`)를
+> 추가해 재테스트한 결과 `via=fast` 98.8~99.1%, 슬롯 전환 99%+가 `+1`로
+> 정상화됨(최초 "효과 없음" 판정은 진단 커밋을 푸시하기 전에 돌려서
+> 구코드로 테스트했던 오판으로 확인됨). 이후 트래픽 증가로 새로 드러난
+> ESP32 쪽 버그 2건도 수정: 인터럽트 워치독 타임아웃 크래시
+> (`firmware-esp32 fix/fhss-interrupt-wdt-timeout`), OTA 재동기화 시
+> config 재승격이 실패해 세션이 강제종료되던 버그
+> (`firmware-esp32 fix/fhss-config-store-resync`). 두 수정 반영 후
+> 진행률이 5% → 18% → 38%까지 개선됨. **아직 미해결**: 일부 SYNC
+> 유실이 10초 재동기화 유예 안에 복구되지 못해 세션이 종료되는 경우가
+> 있음 — 코드 버그가 아니라 RF 재동기화 자체가 실패하는 케이스로
+> 보이며 원인 조사 중.
+> 상세는 `docs/note/design-notes-gateway-ota-es.md` 62~71절, 로그는
+> `artifacts/fhss3_driverFix`~`fhss6_slot_error3`.
+
+> **🚧 (2026-08-25) Qt 화면에 호핑 전송 연동 — 진행 중**
+> `SlotAwareTransport`(호핑 중에도 안전하게 DATA를 보내는 래퍼, 지금까지
+> CLI 전용이었음)를 `transport/slotawaretransport.h/.cpp`로 공유
+> 라이브러리화해서 Qt 화면도 재사용할 수 있게 함(`feature/qt-fhss-transfer`
+> 브랜치). 화면의 실제 "호핑 전송 켜기" 토글·연동은 아직 미완료. 같은
+> 브랜치에서 죽은 UI 옵션(드라이버 선택 콤보의 "로컬 파일" 항목, 실제
+> 구현 없이 방치돼 첫 실행 시 조용히 실패하던 버그의 원인)도 제거.
+> **Qt6 없는 샌드박스에서 작성해 실제 빌드/실기기 검증 필요** —
+> 149(Qt6 6.5.9 + `libqvnc.so` 확인됨, cmake는 아직 설치 필요)에서
+> 검증 준비 중. 상세는 `docs/note/design-notes-gateway-ota-es.md` 61·69절.
+
 ### 마일스톤 1 — Qt 프로젝트 세팅 및 화면 뼈대
 - [x] Qt 프로젝트 생성 (Widgets, CMake) — `OTA_System/`
 - [x] 화면 뼈대 구현 (`OtaManager` : `ui/otamanager.h/.cpp`)
