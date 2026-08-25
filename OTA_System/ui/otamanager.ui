@@ -139,7 +139,21 @@
                     discoverDevices() 결과로만 채워지고, 각 항목의 실제
                     device_id(uint32_t)는 item data(Qt::UserRole)에 저장됨
                     (표시 텍스트는 사람이 읽는 hex 문자열이라 파싱하지 않기
-                    위함). otamanager.cpp의 handleDiscoveredDevices() 참고. -->
+                    위함). otamanager.cpp의 handleDiscoveredDevices() 참고.
+
+                    [2026-08-25] minimumWidth 추가 — 항목 텍스트가
+                    "AA-BB-CC (fw 1.2.3)" 형식(handleDiscoveredDevices()
+                    참고)인데, rootLayout이 왼쪽 열을 stretch=0(내용물
+                    크기만큼만)으로 잡아서 기본 QComboBox 폭으로는 이 텍스트가
+                    잘려 보였음. sizePolicy도 Expanding으로 바꿔서 같은 줄의
+                    discoverButton과 남는 공간을 나눠 갖게 함. -->
+               <property name="sizePolicy">
+                <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+                 <horstretch>0</horstretch>
+                 <verstretch>0</verstretch>
+                </sizepolicy>
+               </property>
+               <property name="minimumSize"><size><width>220</width><height>0</height></size></property>
               </widget>
              </item>
              <item>
