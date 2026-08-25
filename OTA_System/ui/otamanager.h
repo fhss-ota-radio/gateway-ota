@@ -79,13 +79,13 @@ private:
     // 밖, cc1101transport.h의 Cc1101Transport에만 있음)를 m_transport->로
     // 직접 못 부른다 — 컴파일 에러("no member named 'stopFhss' in
     // 'ITransport'") 남. dynamic_cast로 실제 타입을 확인해서 돌려줌
-    // (driverCombo가 CC1101일 때만 m_transport가 실제로 Cc1101Transport라서
-    // 보통 항상 성공하지만, 나중에 LocalFileTransport가 생기면 그때는
-    // nullptr이 돌아올 수 있어 호출부마다 null 체크 필요).
+    // (onConnectClicked()가 항상 Cc1101Transport만 만들어서 지금은 항상
+    // 성공하지만, 나중에 다른 ITransport 구현체가 생기면 그때는 nullptr이
+    // 돌아올 수 있어 호출부마다 null 체크 필요).
     Cc1101Transport *fhssTransport() const;
 
-    // otamanager.ui에서 setupUi()가 채워주는 위젯 트리 (driverCombo, portEdit,
-    // connectButton, unicastRadio/broadcastRadio, targetCombo, selectFileButton,
+    // otamanager.ui에서 setupUi()가 채워주는 위젯 트리 (portEdit, connectButton,
+    // unicastRadio/broadcastRadio, targetCombo, selectFileButton,
     // chunkSizeValueLabel, progressBar, logView 등은 전부 Ui::OtaManager의 멤버)
     Ui::OtaManager *ui;
 

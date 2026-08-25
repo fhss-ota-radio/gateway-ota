@@ -37,23 +37,19 @@
         <layout class="QVBoxLayout" name="connectionOuterLayout">
          <item>
           <layout class="QFormLayout" name="connectionFormLayout">
+           <!-- 2026-08-25 삭제: driverLabel/driverCombo("로컬 파일 (테스트용)" /
+                "CC1101"). LocalFileTransport가 끝내 구현 안 돼서 "로컬 파일"을
+                고르면 무조건 경고만 뜨고 연결이 안 됐다 — 게다가 QSettings
+                기본값(driverIndex=0)이 하필 이 죽은 옵션이라, 첫 실행 때
+                "연결" 버튼을 눌러도 아무 설명 없이 막히는 함정이었음. CC1101
+                하나만 실제로 쓰이므로 선택지 자체를 없애고 항상 CC1101로
+                연결하게 함(otamanager.cpp onConnectClicked() 참고). -->
            <item row="0" column="0">
-            <widget class="QLabel" name="driverLabel">
-             <property name="text"><string>드라이버 선택</string></property>
-            </widget>
-           </item>
-           <item row="0" column="1">
-            <widget class="QComboBox" name="driverCombo">
-             <item><property name="text"><string>로컬 파일 (테스트용)</string></property></item>
-             <item><property name="text"><string>CC1101 (/dev/cc1101)</string></property></item>
-            </widget>
-           </item>
-           <item row="1" column="0">
             <widget class="QLabel" name="portLabel">
              <property name="text"><string>디바이스 경로 / 포트</string></property>
             </widget>
            </item>
-           <item row="1" column="1">
+           <item row="0" column="1">
             <widget class="QLineEdit" name="portEdit">
              <property name="placeholderText"><string>/dev/cc1101</string></property>
             </widget>

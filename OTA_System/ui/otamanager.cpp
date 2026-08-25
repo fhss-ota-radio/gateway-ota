@@ -1,7 +1,7 @@
 #include "otamanager.h"
 #include "ui_otamanager.h"
 
-#include "cc1101transport.h" // Cc1101Transport — driverCombo에서 "CC1101" 선택 시 실제로 생성
+#include "cc1101transport.h" // Cc1101Transport — onConnectClicked()에서 실제로 생성
 #include "fhssrollout.h"     // FhssHopPolicy/rolloutFhssConfig() — FHSS CONFIG/ACTIVATE 핸드셰이크
 
 extern "C" {
@@ -102,7 +102,6 @@ void OtaManager::loadSettings()
     QSettings settings(QStringLiteral("gateway-ota"), QStringLiteral("OtaManager"));
 
     const QString port = settings.value(QStringLiteral("transport/port"), QStringLiteral("/dev/cc1101")).toString();
-    const int driverIndex = settings.value(QStringLiteral("transport/driverIndex"), 0).toInt();
     const bool broadcast = settings.value(QStringLiteral("target/broadcast"), false).toBool();
     // 기본값 없음(빈 문자열) — 코드에 시드를 하드코딩하지 않기 위해서.
     // 사용자가 직접 입력하거나 "무작위 생성"으로 채워야 함
@@ -112,8 +111,6 @@ void OtaManager::loadSettings()
     const int generation = settings.value(QStringLiteral("fhss/generation"), 1).toInt();
 
     ui->portEdit->setText(port);
-    if (driverIndex >= 0 && driverIndex < ui->driverCombo->count())
-        ui->driverCombo->setCurrentIndex(driverIndex);
     if (broadcast)
         ui->broadcastRadio->setChecked(true);
     else
@@ -128,7 +125,6 @@ void OtaManager::saveSettings()
 {
     QSettings settings(QStringLiteral("gateway-ota"), QStringLiteral("OtaManager"));
     settings.setValue(QStringLiteral("transport/port"), ui->portEdit->text());
-    settings.setValue(QStringLiteral("transport/driverIndex"), ui->driverCombo->currentIndex());
     settings.setValue(QStringLiteral("target/broadcast"), ui->broadcastRadio->isChecked());
     settings.setValue(QStringLiteral("fhss/hopSeed"), ui->hopSeedEdit->text());
     settings.setValue(QStringLiteral("fhss/channelCount"), ui->fhssChannelCountSpin->value());
@@ -141,10 +137,10 @@ Cc1101Transport *OtaManager::fhssTransport() const
     // m_transport의 정적 타입은 ITransport*(하드웨어 종류에 상관없이 쓰려고
     // 일부러 그렇게 선언함, otamanager.h 참고)라서 stopFhss() 같은 CC1101
     // 전용 메서드를 바로 못 부른다 — dynamic_cast로 실제로 가리키는 게
-    // Cc1101Transport가 맞는지 확인해서 그 타입의 포인터로 돌려줌. 지금은
-    // driverCombo가 CC1101일 때만 m_transport가 만들어지므로 항상 성공하지만,
-    // 호출부는 그래도 nullptr 가능성을 확인해야 함(로컬 파일 드라이버가
-    // 생기면 그때는 실제로 nullptr이 됨).
+    // Cc1101Transport가 맞는지 확인해서 그 타입의 포인터로 돌려줌. 2026-08-25
+    // 기준 onConnectClicked()는 항상 Cc1101Transport만 만들므로 지금은 항상
+    // 성공하지만, 나중에 다른 ITransport 구현체가 추가되면 그때는 nullptr이
+    // 될 수 있으므로 호출부는 여전히 null 체크를 해야 함.
     return dynamic_cast<Cc1101Transport *>(m_transport.get());
 }
 
@@ -219,16 +215,10 @@ void OtaManager::onConnectClicked()
         return;
     }
 
-    // driverCombo: 0="로컬 파일 (테스트용)", 1="CC1101 (/dev/cc1101)" (otamanager.ui 순서 그대로)
-    // 로컬 파일 백엔드(LocalFileTransport)는 아직 구현되지 않음(docs/roadmap.md
-    // 마일스톤 3 체크리스트 참고) — CC1101만 실제로 연결됨.
-    if (ui->driverCombo->currentIndex() != 1) {
-        appendLog(QStringLiteral("WARN"),
-                  tr("\"%1\" 드라이버는 아직 미구현입니다 — CC1101을 선택하세요")
-                      .arg(ui->driverCombo->currentText()));
-        return;
-    }
-
+    // 2026-08-25: 드라이버 선택 콤보 삭제됨 — LocalFileTransport가 끝내
+    // 구현되지 않아서 실제로는 항상 CC1101뿐이었다(docs/roadmap.md 마일스톤 3
+    // 체크리스트 참고). 나중에 다른 ITransport 구현체가 실제로 생기면 그때
+    // 다시 선택 UI를 추가한다.
     auto transport = std::make_unique<Cc1101Transport>(ui->portEdit->text().toStdString());
     if (!transport->open()) {
         appendLog(QStringLiteral("ERROR"),
@@ -250,9 +240,9 @@ void OtaManager::onConnectClicked()
 
     m_connected = true;
     ui->connectionStatusDot->setStyleSheet(QStringLiteral("background-color:#2ecc71; border-radius:5px;"));
-    ui->connectionStatusLabel->setText(tr("연결됨 (%1)").arg(ui->driverCombo->currentText()));
+    ui->connectionStatusLabel->setText(tr("연결됨 (CC1101)"));
     ui->connectButton->setText(tr("연결 해제"));
-    appendLog(QStringLiteral("INFO"), tr("연결됨: %1 / %2").arg(ui->driverCombo->currentText(), ui->portEdit->text()));
+    appendLog(QStringLiteral("INFO"), tr("연결됨: CC1101 / %1").arg(ui->portEdit->text()));
 }
 
 void OtaManager::onModeChanged()
@@ -449,15 +439,13 @@ void OtaManager::onHopSeedRandomClicked()
 {
     // QRandomGenerator::global()이 uint32_t 그대로인 quint32를 뽑아주므로
     // kernel-cc1101-spi의 cc1101_fhss_hop_policy.seed(uint32_t)와 범위가
-    // 정확히 맞음 — 나중에 실제로 파이/ESP32에 넘길 때 값 변환이 필요 없음.
+    // 정확히 맞음 — 실제로 파이/ESP32에 넘길 때 값 변환이 필요 없음.
     //
-    // TODO(다음 단계): 지금은 화면에만 값을 채우고 끝 — 실제로 라즈베리파이
-    // CC1101 드라이버(ioctl CC1101_IOC_FHSS_SET_CONFIG, kernel-cc1101-spi/
-    // cc1101_hop.c)에 넘기거나 ESP32로 전달하는 연동은 아직 없음. ESP32
-    // 쪽은 현재 시드 개념 자체가 없어서(순차 채널 배열만 하드코딩, 담당자
-    // 문서에 "시드 기반 셔플은 미구현"이라고 명시) 프로토콜 확장이 먼저
-    // 필요함 — 자세한 조사 내용은
-    // docs/note/design-notes-gateway-ota-es.md 참고
+    // [2026-08-25 갱신] 이 버튼을 만들 당시엔 화면에 값만 채우고 끝이었지만,
+    // Task #4(FHSS 섹션 UI + rollout 연동)가 끝난 지금은 onFhssActivateClicked()가
+    // hopSeedEdit의 값을 그대로 읽어 FhssHopPolicy::seed로 실제 CONFIG/ACTIVATE
+    // 핸드셰이크에 실어 보낸다 — 아래는 그 값을 미리 채워두는 편의 기능이고,
+    // "FHSS 활성화"를 누를 때 비어있으면 그때 자동으로도 채워진다(같은 로직).
     const quint32 seed = QRandomGenerator::global()->generate();
     ui->hopSeedEdit->setText(QString::number(seed));
     appendLog(QStringLiteral("INFO"), tr("호핑 난수 무작위 생성: %1").arg(seed));
