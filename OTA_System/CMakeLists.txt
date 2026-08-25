@@ -346,6 +346,18 @@ target_link_libraries(ota_smoke_fhss_activate
         ota_core
 )
 
+# FHSS 잔여 호핑 상태를 정리하고 채널 0 고정으로 되돌리기만 하는 최소
+# CLI — ota_smoke_session_send(비호핑) 직전에 한 번 실행하는 용도.
+# 2026-08-25, 148 실기기에서 이전 실행이 남긴 커널 호핑 상태 때문에
+# 비호핑 테스트가 막힌 사례로 필요성 확인(design-notes 73절).
+add_executable(ota_smoke_fhss_reset
+    tests/smoke_fhss_reset_main.cpp
+)
+target_link_libraries(ota_smoke_fhss_reset
+    PRIVATE
+        ota_core
+)
+
 # CONFIG/ACTIVATE/커널 호핑 시작까지는 ota_smoke_fhss_activate와 동일하게 하고,
 # 그 위에서 OtaSession으로 실제 파일 전송까지 이어붙이는 CLI — 2026-08-23.
 # ota_smoke_fhss_activate가 SYNC 관찰까지만 하고 끝나는 도구라는 게 확인된 뒤

@@ -74,7 +74,8 @@ SMOKE_BINS := \
 	ota_smoke_discover \
 	ota_smoke_discover_session_send \
 	ota_smoke_fhss_activate \
-	ota_smoke_fhss_ota_transfer
+	ota_smoke_fhss_ota_transfer \
+	ota_smoke_fhss_reset
 
 ota_smoke_send_SRC                  := tests/smoke_send_main.cpp
 ota_smoke_recv_SRC                  := tests/smoke_recv_main.cpp
@@ -84,6 +85,9 @@ ota_smoke_discover_SRC              := tests/smoke_discover_main.cpp
 ota_smoke_discover_session_send_SRC := tests/smoke_discover_session_send_main.cpp
 ota_smoke_fhss_activate_SRC         := tests/smoke_fhss_activate_main.cpp
 ota_smoke_fhss_ota_transfer_SRC     := tests/smoke_fhss_ota_transfer_main.cpp
+# 2026-08-25 추가 — CMakeLists.txt의 ota_smoke_fhss_reset 대응 (잔여
+# 호핑 정리 전용, tests/smoke_fhss_reset_main.cpp 상단 주석 참고)
+ota_smoke_fhss_reset_SRC            := tests/smoke_fhss_reset_main.cpp
 
 # ---------- 유닛테스트 — 실기기 불필요, ctest 대응 (CMakeLists.txt 108~171행) ----------
 # 실기기 없이도 로직만 검증하는 것들이라 원래 목적은 Mac에서 ctest로
