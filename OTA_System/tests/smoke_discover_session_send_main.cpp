@@ -35,6 +35,22 @@ bool parsePositiveInt(const char *text, int *out)
     }
 }
 
+bool parseNonNegativeInt(const char *text, int *out)
+{
+    if (text == nullptr || *text == '\0')
+        return false;
+    try {
+        size_t consumed = 0;
+        const long value = std::stol(text, &consumed, 10);
+        if (consumed != std::string(text).size() || value < 0 || value > 3600000)
+            return false;
+        *out = static_cast<int>(value);
+        return true;
+    } catch (const std::exception &) {
+        return false;
+    }
+}
+
 bool parseDeviceId(const std::string &text, uint32_t *out)
 {
     if (text.empty())
@@ -79,7 +95,7 @@ void printUsage(const char *program)
            " [batch_size] [chunk_delay_ms] [max_session_ms]\n"
         << "  device_id_hex omitted: exactly one discovered device is required\n"
         << "  broadcast ffffffff is intentionally rejected\n"
-        << "  defaults: discover_wait_ms=1000 batch_size=5 chunk_delay_ms=40"
+        << "  defaults: discover_wait_ms=1000 batch_size=5 chunk_delay_ms=0"
            " max_session_ms=120000\n";
 }
 
@@ -103,13 +119,13 @@ int main(int argc, char *argv[])
 
     int discoverWaitMs = 1000;
     int batchSize = 5;
-    int chunkDelayMs = 40;
+    int chunkDelayMs = 0;
     int maxSessionMs = 120000;
     if ((argc >= 5 && !parsePositiveInt(argv[4], &discoverWaitMs)) ||
         (argc >= 6 && !parsePositiveInt(argv[5], &batchSize)) ||
-        (argc >= 7 && !parsePositiveInt(argv[6], &chunkDelayMs)) ||
+        (argc >= 7 && !parseNonNegativeInt(argv[6], &chunkDelayMs)) ||
         (argc >= 8 && !parsePositiveInt(argv[7], &maxSessionMs))) {
-        std::cerr << "Invalid positive numeric option\n";
+        std::cerr << "Invalid numeric option\n";
         return 64;
     }
     if (discoverWaitMs > 5000 || batchSize > 32 || chunkDelayMs > 1000) {

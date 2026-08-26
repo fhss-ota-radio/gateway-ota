@@ -59,17 +59,16 @@ public:
     // batchSize/timeoutMs/maxRetry 기본값은 docs/fsm-design.md 결정 이력
     // (2026-08-11)의 batchSize=5, "300ms x 5회, 모든 단계 통일"을 그대로 씀.
     //
-    // chunkDelayMs: fsm-design.md 작성 시점(2026-08-11)에는 없던 값입니다.
-    // 그 뒤 실기기 검증(2026-08-17, docs/roadmap.md 4절)에서 배치 안 청크를
-    // 쉬지 않고 연속으로 쏘면(0ms) 수신측 처리가 못 따라가 패킷 경계가
-    // 무너지는 게 확인됐습니다 — 그래서 배치 내부 전송에도 같은 간격을 둡니다.
-    // session/simplesender.h의 chunkDelayMs와 같은 이유·같은 기본값(40ms).
+    // chunkDelayMs: ESP32가 DATA별 즉시 ACK을 보내던 동안에는 반이중 충돌을
+    // 줄이기 위해 40ms를 썼다. 이제 수신측이 배치 전체를 RAM에 받은 뒤
+    // Flash commit하고 ACK을 몰아서 보내므로 기본값 0ms로 5개를 연속 송신한다.
+    // 실기기 튜닝이나 구형 수신기 호환이 필요하면 호출부에서 양수로 지정 가능.
     explicit OtaSession(
         ITransport &transport,
         int batchSize = 5,
         int timeoutMs = 300,
         int maxRetry = 5,
-        int chunkDelayMs = 40);
+        int chunkDelayMs = 0);
 
     // FILE_READY -> HANDSHAKING 진입에 해당. 내부에서 파일 크기 확인 +
     // BinSplitter::split()까지 수행합니다 (chunkSize는 항상 OTA_MAX_PAYLOAD_SIZE —

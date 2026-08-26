@@ -460,12 +460,12 @@ void OtaManager::onStartClicked()
         Cc1101Transport *cc1101 = fhssTransport();
         if (!prepareFixedOta(cc1101, tr("비호핑 OTA 시작")))
             return;
-        // 2026-08-25 .149 실기기에서 START와 DATA/ACK 3842개까지 검증된
-        // ota_smoke_session_send 인자와 동일: batch=5, timeout=600ms,
-        // maxRetry=20, chunkDelay=40ms.
+        // ESP32가 5개 DATA를 RAM에 받은 뒤 Flash commit하고 ACK 5개를
+        // 순차 송신하므로, Gateway도 중간 ACK 대기 없이 5개를 연속 송신한다.
+        // timeout/maxRetry 여유값은 기존 실기기 안정화 값을 유지한다.
         m_session = std::make_unique<OtaSession>(*m_transport, /*batchSize=*/5,
                                                   /*timeoutMs=*/600, /*maxRetry=*/20,
-                                                  /*chunkDelayMs=*/40);
+                                                  /*chunkDelayMs=*/0);
     }
     m_session->setOnStateChanged([this](OtaSessionState state) { handleSessionStateChanged(state); });
     m_session->setOnLog([this](const std::string &message) {
