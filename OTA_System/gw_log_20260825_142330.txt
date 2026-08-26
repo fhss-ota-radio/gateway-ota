@@ -1,0 +1,1589 @@
+[TeeLogger] 로그 파일: gw_log_20260825_142330.txt
+[smoke_session_send] device=/dev/cc1101 file=/home/root/gateway-ota/firmware/fhss-ota-radio.bin target=0xa29e60 batchSize=5 chunkDelayMs=40 timeoutMs=600 maxRetry=8
+[smoke_session_send] transport open 성공
+[smoke_session_send] 상태 -> Handshaking
+[smoke_session_send] 세션 시작 session_id=0x4d86f424
+[smoke_session_send][log] START ACK 수신 (session_id=0x4D86F424) -> 배치 전송 시작
+[smoke_session_send][log] START ACK 이후 pre-DATA stale RX userspace drain=0
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 1 전송 시작 (seq=0..4, 5개)
+[smoke_session_send][log] seq=0 ACK 수신 (1/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 1/7825 (배치 1/1565)
+[smoke_session_send][log] seq=4 ACK 수신 (2/7825)
+[smoke_session_send] 진행 2/7825 (배치 1/1565)
+[smoke_session_send][log] seq=1 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=2 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send][log] seq=1 ACK 수신 (3/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 3/7825 (배치 1/1565)
+[smoke_session_send][log] seq=3 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send][log] seq=2 ACK 수신 (4/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 4/7825 (배치 1/1565)
+[smoke_session_send][log] seq=3 ACK 수신 (5/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 2 전송 시작 (seq=5..9, 5개)
+[smoke_session_send][log] seq=5 ACK 수신 (6/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 6/7825 (배치 2/1565)
+[smoke_session_send][log] seq=7 ACK 수신 (7/7825)
+[smoke_session_send] 진행 7/7825 (배치 2/1565)
+[smoke_session_send][log] seq=9 ACK 수신 (8/7825)
+[smoke_session_send] 진행 8/7825 (배치 2/1565)
+[smoke_session_send][log] seq=6 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=8 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=6 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=8 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=8 ACK 수신 (9/7825)
+[smoke_session_send] 진행 9/7825 (배치 2/1565)
+[smoke_session_send][log] seq=6 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=6 ACK 수신 (10/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 3 전송 시작 (seq=10..14, 5개)
+[smoke_session_send][log] seq=10 ACK 수신 (11/7825)
+[smoke_session_send][log] seq=11 ACK 수신 (12/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 12/7825 (배치 3/1565)
+[smoke_session_send][log] seq=12 ACK 수신 (13/7825)
+[smoke_session_send] 진행 13/7825 (배치 3/1565)
+[smoke_session_send][log] seq=14 ACK 수신 (14/7825)
+[smoke_session_send] 진행 14/7825 (배치 3/1565)
+[smoke_session_send][log] seq=13 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=13 ACK 수신 (15/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 4 전송 시작 (seq=15..19, 5개)
+[smoke_session_send][log] seq=15 ACK 수신 (16/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 16/7825 (배치 4/1565)
+[smoke_session_send][log] seq=17 ACK 수신 (17/7825)
+[smoke_session_send] 진행 17/7825 (배치 4/1565)
+[smoke_session_send][log] seq=19 ACK 수신 (18/7825)
+[smoke_session_send] 진행 18/7825 (배치 4/1565)
+[smoke_session_send][log] seq=16 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=18 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=16 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=18 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=16 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=18 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=16 재전송 (사유=timeout, 재시도 4/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=18 재전송 (사유=timeout, 재시도 4/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=18 ACK 수신 (19/7825)
+[smoke_session_send] 진행 19/7825 (배치 4/1565)
+[smoke_session_send][log] seq=16 재전송 (사유=timeout, 재시도 5/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=16 ACK 수신 (20/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 5 전송 시작 (seq=20..24, 5개)
+[smoke_session_send][log] seq=20 ACK 수신 (21/7825)
+[smoke_session_send][log] seq=21 ACK 수신 (22/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 22/7825 (배치 5/1565)
+[smoke_session_send][log] seq=22 ACK 수신 (23/7825)
+[smoke_session_send] 진행 23/7825 (배치 5/1565)
+[smoke_session_send][log] seq=24 ACK 수신 (24/7825)
+[smoke_session_send] 진행 24/7825 (배치 5/1565)
+[smoke_session_send][log] seq=23 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=23 ACK 수신 (25/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 6 전송 시작 (seq=25..29, 5개)
+[smoke_session_send][log] seq=25 ACK 수신 (26/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 26/7825 (배치 6/1565)
+[smoke_session_send][log] seq=27 ACK 수신 (27/7825)
+[smoke_session_send] 진행 27/7825 (배치 6/1565)
+[smoke_session_send][log] seq=29 ACK 수신 (28/7825)
+[smoke_session_send] 진행 28/7825 (배치 6/1565)
+[smoke_session_send][log] seq=26 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=28 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=26 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=28 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=28 ACK 수신 (29/7825)
+[smoke_session_send] 진행 29/7825 (배치 6/1565)
+[smoke_session_send][log] seq=26 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=26 재전송 (사유=timeout, 재시도 4/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=26 ACK 수신 (30/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 7 전송 시작 (seq=30..34, 5개)
+[smoke_session_send][log] seq=30 ACK 수신 (31/7825)
+[smoke_session_send][log] seq=33 ACK 수신 (32/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 32/7825 (배치 7/1565)
+[smoke_session_send][log] seq=34 ACK 수신 (33/7825)
+[smoke_session_send] 진행 33/7825 (배치 7/1565)
+[smoke_session_send][log] seq=31 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=32 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send][log] seq=31 ACK 수신 (34/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 34/7825 (배치 7/1565)
+[smoke_session_send][log] seq=32 ACK 수신 (35/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 8 전송 시작 (seq=35..39, 5개)
+[smoke_session_send][log] seq=35 ACK 수신 (36/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 36/7825 (배치 8/1565)
+[smoke_session_send][log] seq=37 ACK 수신 (37/7825)
+[smoke_session_send] 진행 37/7825 (배치 8/1565)
+[smoke_session_send][log] seq=39 ACK 수신 (38/7825)
+[smoke_session_send] 진행 38/7825 (배치 8/1565)
+[smoke_session_send][log] seq=36 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=38 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=36 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=38 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=36 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=38 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=36 재전송 (사유=timeout, 재시도 4/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=38 재전송 (사유=timeout, 재시도 4/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=36 재전송 (사유=timeout, 재시도 5/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=38 재전송 (사유=timeout, 재시도 5/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=38 NACK 수신 (result_code=10)
+[smoke_session_send][log] seq=38 재전송 (사유=NACK, 재시도 6/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=38 ACK 수신 (39/7825)
+[smoke_session_send] 진행 39/7825 (배치 8/1565)
+[smoke_session_send][log] seq=36 재전송 (사유=timeout, 재시도 6/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=36 재전송 (사유=timeout, 재시도 7/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=36 ACK 수신 (40/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 9 전송 시작 (seq=40..44, 5개)
+[smoke_session_send][log] seq=40 ACK 수신 (41/7825)
+[smoke_session_send][log] seq=41 ACK 수신 (42/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 42/7825 (배치 9/1565)
+[smoke_session_send][log] seq=42 ACK 수신 (43/7825)
+[smoke_session_send] 진행 43/7825 (배치 9/1565)
+[smoke_session_send][log] seq=44 ACK 수신 (44/7825)
+[smoke_session_send] 진행 44/7825 (배치 9/1565)
+[smoke_session_send][log] seq=43 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=43 ACK 수신 (45/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 10 전송 시작 (seq=45..49, 5개)
+[smoke_session_send][log] seq=46 ACK 수신 (46/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 46/7825 (배치 10/1565)
+[smoke_session_send][log] seq=45 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=47 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=48 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send][log] seq=47 ACK 수신 (47/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 47/7825 (배치 10/1565)
+[smoke_session_send][log] seq=49 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send][log] seq=48 ACK 수신 (48/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 48/7825 (배치 10/1565)
+[smoke_session_send][log] seq=49 ACK 수신 (49/7825)
+[smoke_session_send] 진행 49/7825 (배치 10/1565)
+[smoke_session_send][log] seq=45 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=45 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=45 재전송 (사유=timeout, 재시도 4/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=45 ACK 수신 (50/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 11 전송 시작 (seq=50..54, 5개)
+[smoke_session_send][log] seq=50 ACK 수신 (51/7825)
+[smoke_session_send][log] seq=51 ACK 수신 (52/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 52/7825 (배치 11/1565)
+[smoke_session_send][log] seq=52 ACK 수신 (53/7825)
+[smoke_session_send] 진행 53/7825 (배치 11/1565)
+[smoke_session_send][log] seq=54 ACK 수신 (54/7825)
+[smoke_session_send] 진행 54/7825 (배치 11/1565)
+[smoke_session_send][log] seq=53 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=53 ACK 수신 (55/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 12 전송 시작 (seq=55..59, 5개)
+[smoke_session_send][log] seq=55 ACK 수신 (56/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 56/7825 (배치 12/1565)
+[smoke_session_send][log] seq=57 ACK 수신 (57/7825)
+[smoke_session_send] 진행 57/7825 (배치 12/1565)
+[smoke_session_send][log] seq=59 ACK 수신 (58/7825)
+[smoke_session_send] 진행 58/7825 (배치 12/1565)
+[smoke_session_send][log] seq=56 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=58 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=56 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=58 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=58 ACK 수신 (59/7825)
+[smoke_session_send] 진행 59/7825 (배치 12/1565)
+[smoke_session_send][log] seq=56 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=56 재전송 (사유=timeout, 재시도 4/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=56 ACK 수신 (60/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 13 전송 시작 (seq=60..64, 5개)
+[smoke_session_send][log] seq=60 ACK 수신 (61/7825)
+[smoke_session_send][log] seq=61 ACK 수신 (62/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 62/7825 (배치 13/1565)
+[smoke_session_send][log] seq=62 ACK 수신 (63/7825)
+[smoke_session_send] 진행 63/7825 (배치 13/1565)
+[smoke_session_send][log] seq=64 ACK 수신 (64/7825)
+[smoke_session_send] 진행 64/7825 (배치 13/1565)
+[smoke_session_send][log] seq=63 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=63 ACK 수신 (65/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 14 전송 시작 (seq=65..69, 5개)
+[smoke_session_send][log] seq=65 ACK 수신 (66/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 66/7825 (배치 14/1565)
+[smoke_session_send][log] seq=67 ACK 수신 (67/7825)
+[smoke_session_send] 진행 67/7825 (배치 14/1565)
+[smoke_session_send][log] seq=69 ACK 수신 (68/7825)
+[smoke_session_send] 진행 68/7825 (배치 14/1565)
+[smoke_session_send][log] seq=66 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=68 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=66 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=68 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=68 ACK 수신 (69/7825)
+[smoke_session_send] 진행 69/7825 (배치 14/1565)
+[smoke_session_send][log] seq=66 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=66 ACK 수신 (70/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 15 전송 시작 (seq=70..74, 5개)
+[smoke_session_send][log] seq=70 ACK 수신 (71/7825)
+[smoke_session_send][log] seq=71 ACK 수신 (72/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 72/7825 (배치 15/1565)
+[smoke_session_send][log] seq=72 ACK 수신 (73/7825)
+[smoke_session_send] 진행 73/7825 (배치 15/1565)
+[smoke_session_send][log] seq=74 ACK 수신 (74/7825)
+[smoke_session_send] 진행 74/7825 (배치 15/1565)
+[smoke_session_send][log] seq=73 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=73 ACK 수신 (75/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 16 전송 시작 (seq=75..79, 5개)
+[smoke_session_send][log] seq=75 ACK 수신 (76/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 76/7825 (배치 16/1565)
+[smoke_session_send][log] seq=77 ACK 수신 (77/7825)
+[smoke_session_send] 진행 77/7825 (배치 16/1565)
+[smoke_session_send][log] seq=79 ACK 수신 (78/7825)
+[smoke_session_send] 진행 78/7825 (배치 16/1565)
+[smoke_session_send][log] seq=76 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=78 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send][log] seq=76 ACK 수신 (79/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 79/7825 (배치 16/1565)
+[smoke_session_send][log] seq=78 ACK 수신 (80/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 17 전송 시작 (seq=80..84, 5개)
+[smoke_session_send][log] seq=80 ACK 수신 (81/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 81/7825 (배치 17/1565)
+[smoke_session_send][log] seq=82 ACK 수신 (82/7825)
+[smoke_session_send] 진행 82/7825 (배치 17/1565)
+[smoke_session_send][log] seq=84 ACK 수신 (83/7825)
+[smoke_session_send] 진행 83/7825 (배치 17/1565)
+[smoke_session_send][log] seq=81 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=83 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=81 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=83 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=81 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=83 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=81 재전송 (사유=timeout, 재시도 4/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=83 재전송 (사유=timeout, 재시도 4/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=83 ACK 수신 (84/7825)
+[smoke_session_send] 진행 84/7825 (배치 17/1565)
+[smoke_session_send][log] seq=81 재전송 (사유=timeout, 재시도 5/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=81 ACK 수신 (85/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 18 전송 시작 (seq=85..89, 5개)
+[smoke_session_send][log] seq=85 ACK 수신 (86/7825)
+[smoke_session_send][log] seq=86 ACK 수신 (87/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 87/7825 (배치 18/1565)
+[smoke_session_send][log] seq=87 ACK 수신 (88/7825)
+[smoke_session_send] 진행 88/7825 (배치 18/1565)
+[smoke_session_send][log] seq=89 ACK 수신 (89/7825)
+[smoke_session_send] 진행 89/7825 (배치 18/1565)
+[smoke_session_send][log] seq=88 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=88 ACK 수신 (90/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 19 전송 시작 (seq=90..94, 5개)
+[smoke_session_send][log] seq=90 ACK 수신 (91/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 91/7825 (배치 19/1565)
+[smoke_session_send][log] seq=92 ACK 수신 (92/7825)
+[smoke_session_send] 진행 92/7825 (배치 19/1565)
+[smoke_session_send][log] seq=94 ACK 수신 (93/7825)
+[smoke_session_send] 진행 93/7825 (배치 19/1565)
+[smoke_session_send][log] seq=91 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=93 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=91 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=93 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=91 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=93 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=91 재전송 (사유=timeout, 재시도 4/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=93 재전송 (사유=timeout, 재시도 4/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=91 재전송 (사유=timeout, 재시도 5/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=93 재전송 (사유=timeout, 재시도 5/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=93 NACK 수신 (result_code=10)
+[smoke_session_send][log] seq=93 재전송 (사유=NACK, 재시도 6/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=93 ACK 수신 (94/7825)
+[smoke_session_send] 진행 94/7825 (배치 19/1565)
+[smoke_session_send][log] seq=91 재전송 (사유=timeout, 재시도 6/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=91 재전송 (사유=timeout, 재시도 7/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=91 ACK 수신 (95/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 20 전송 시작 (seq=95..99, 5개)
+[smoke_session_send][log] seq=95 ACK 수신 (96/7825)
+[smoke_session_send][log] seq=96 ACK 수신 (97/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 97/7825 (배치 20/1565)
+[smoke_session_send][log] seq=97 ACK 수신 (98/7825)
+[smoke_session_send] 진행 98/7825 (배치 20/1565)
+[smoke_session_send][log] seq=99 ACK 수신 (99/7825)
+[smoke_session_send] 진행 99/7825 (배치 20/1565)
+[smoke_session_send][log] seq=98 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=98 ACK 수신 (100/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 21 전송 시작 (seq=100..104, 5개)
+[smoke_session_send][log] seq=100 ACK 수신 (101/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 101/7825 (배치 21/1565)
+[smoke_session_send][log] seq=102 ACK 수신 (102/7825)
+[smoke_session_send] 진행 102/7825 (배치 21/1565)
+[smoke_session_send][log] seq=104 ACK 수신 (103/7825)
+[smoke_session_send] 진행 103/7825 (배치 21/1565)
+[smoke_session_send][log] seq=101 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=103 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=101 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=103 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=101 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=103 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=101 재전송 (사유=timeout, 재시도 4/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=103 재전송 (사유=timeout, 재시도 4/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=101 재전송 (사유=timeout, 재시도 5/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=103 재전송 (사유=timeout, 재시도 5/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=103 NACK 수신 (result_code=10)
+[smoke_session_send][log] seq=103 재전송 (사유=NACK, 재시도 6/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=103 ACK 수신 (104/7825)
+[smoke_session_send] 진행 104/7825 (배치 21/1565)
+[smoke_session_send][log] seq=101 재전송 (사유=timeout, 재시도 6/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=101 재전송 (사유=timeout, 재시도 7/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=101 ACK 수신 (105/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 22 전송 시작 (seq=105..109, 5개)
+[smoke_session_send][log] seq=105 ACK 수신 (106/7825)
+[smoke_session_send][log] seq=106 ACK 수신 (107/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 107/7825 (배치 22/1565)
+[smoke_session_send][log] seq=107 ACK 수신 (108/7825)
+[smoke_session_send] 진행 108/7825 (배치 22/1565)
+[smoke_session_send][log] seq=109 ACK 수신 (109/7825)
+[smoke_session_send] 진행 109/7825 (배치 22/1565)
+[smoke_session_send][log] seq=108 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=108 ACK 수신 (110/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 23 전송 시작 (seq=110..114, 5개)
+[smoke_session_send][log] seq=110 ACK 수신 (111/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 111/7825 (배치 23/1565)
+[smoke_session_send][log] seq=112 ACK 수신 (112/7825)
+[smoke_session_send] 진행 112/7825 (배치 23/1565)
+[smoke_session_send][log] seq=114 ACK 수신 (113/7825)
+[smoke_session_send] 진행 113/7825 (배치 23/1565)
+[smoke_session_send][log] seq=111 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=113 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=111 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=113 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=113 ACK 수신 (114/7825)
+[smoke_session_send] 진행 114/7825 (배치 23/1565)
+[smoke_session_send][log] seq=111 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=111 ACK 수신 (115/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 24 전송 시작 (seq=115..119, 5개)
+[smoke_session_send][log] seq=115 ACK 수신 (116/7825)
+[smoke_session_send][log] seq=116 ACK 수신 (117/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 117/7825 (배치 24/1565)
+[smoke_session_send][log] seq=117 ACK 수신 (118/7825)
+[smoke_session_send] 진행 118/7825 (배치 24/1565)
+[smoke_session_send][log] seq=119 ACK 수신 (119/7825)
+[smoke_session_send] 진행 119/7825 (배치 24/1565)
+[smoke_session_send][log] seq=118 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=118 ACK 수신 (120/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 25 전송 시작 (seq=120..124, 5개)
+[smoke_session_send][log] seq=120 ACK 수신 (121/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 121/7825 (배치 25/1565)
+[smoke_session_send][log] seq=122 ACK 수신 (122/7825)
+[smoke_session_send] 진행 122/7825 (배치 25/1565)
+[smoke_session_send][log] seq=124 ACK 수신 (123/7825)
+[smoke_session_send] 진행 123/7825 (배치 25/1565)
+[smoke_session_send][log] seq=121 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=123 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send][log] seq=121 ACK 수신 (124/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 124/7825 (배치 25/1565)
+[smoke_session_send][log] seq=123 ACK 수신 (125/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 26 전송 시작 (seq=125..129, 5개)
+[smoke_session_send][log] seq=125 ACK 수신 (126/7825)
+[smoke_session_send][log] seq=126 ACK 수신 (127/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 127/7825 (배치 26/1565)
+[smoke_session_send][log] seq=127 ACK 수신 (128/7825)
+[smoke_session_send] 진행 128/7825 (배치 26/1565)
+[smoke_session_send][log] seq=129 ACK 수신 (129/7825)
+[smoke_session_send] 진행 129/7825 (배치 26/1565)
+[smoke_session_send][log] seq=128 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=128 ACK 수신 (130/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 27 전송 시작 (seq=130..134, 5개)
+[smoke_session_send][log] seq=130 ACK 수신 (131/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 131/7825 (배치 27/1565)
+[smoke_session_send][log] seq=132 ACK 수신 (132/7825)
+[smoke_session_send] 진행 132/7825 (배치 27/1565)
+[smoke_session_send][log] seq=134 ACK 수신 (133/7825)
+[smoke_session_send] 진행 133/7825 (배치 27/1565)
+[smoke_session_send][log] seq=131 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=133 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=131 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=133 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=131 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=133 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=131 재전송 (사유=timeout, 재시도 4/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=133 재전송 (사유=timeout, 재시도 4/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=131 재전송 (사유=timeout, 재시도 5/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=133 재전송 (사유=timeout, 재시도 5/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=133 NACK 수신 (result_code=10)
+[smoke_session_send][log] seq=133 재전송 (사유=NACK, 재시도 6/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=133 ACK 수신 (134/7825)
+[smoke_session_send] 진행 134/7825 (배치 27/1565)
+[smoke_session_send][log] seq=131 재전송 (사유=timeout, 재시도 6/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=131 재전송 (사유=timeout, 재시도 7/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=131 ACK 수신 (135/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 28 전송 시작 (seq=135..139, 5개)
+[smoke_session_send][log] seq=135 ACK 수신 (136/7825)
+[smoke_session_send][log] seq=136 ACK 수신 (137/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 137/7825 (배치 28/1565)
+[smoke_session_send][log] seq=137 ACK 수신 (138/7825)
+[smoke_session_send] 진행 138/7825 (배치 28/1565)
+[smoke_session_send][log] seq=139 ACK 수신 (139/7825)
+[smoke_session_send] 진행 139/7825 (배치 28/1565)
+[smoke_session_send][log] seq=138 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=138 ACK 수신 (140/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 29 전송 시작 (seq=140..144, 5개)
+[smoke_session_send][log] seq=140 ACK 수신 (141/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 141/7825 (배치 29/1565)
+[smoke_session_send][log] seq=142 ACK 수신 (142/7825)
+[smoke_session_send] 진행 142/7825 (배치 29/1565)
+[smoke_session_send][log] seq=144 ACK 수신 (143/7825)
+[smoke_session_send] 진행 143/7825 (배치 29/1565)
+[smoke_session_send][log] seq=141 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=143 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=141 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=143 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=143 ACK 수신 (144/7825)
+[smoke_session_send] 진행 144/7825 (배치 29/1565)
+[smoke_session_send][log] seq=141 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=141 재전송 (사유=timeout, 재시도 4/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=141 ACK 수신 (145/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 30 전송 시작 (seq=145..149, 5개)
+[smoke_session_send][log] seq=145 ACK 수신 (146/7825)
+[smoke_session_send][log] seq=146 ACK 수신 (147/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 147/7825 (배치 30/1565)
+[smoke_session_send][log] seq=147 ACK 수신 (148/7825)
+[smoke_session_send] 진행 148/7825 (배치 30/1565)
+[smoke_session_send][log] seq=149 ACK 수신 (149/7825)
+[smoke_session_send] 진행 149/7825 (배치 30/1565)
+[smoke_session_send][log] seq=148 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=148 ACK 수신 (150/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 31 전송 시작 (seq=150..154, 5개)
+[smoke_session_send][log] seq=150 ACK 수신 (151/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 151/7825 (배치 31/1565)
+[smoke_session_send][log] seq=152 ACK 수신 (152/7825)
+[smoke_session_send] 진행 152/7825 (배치 31/1565)
+[smoke_session_send][log] seq=154 ACK 수신 (153/7825)
+[smoke_session_send] 진행 153/7825 (배치 31/1565)
+[smoke_session_send][log] seq=151 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=153 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=151 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=153 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=151 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=153 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=151 재전송 (사유=timeout, 재시도 4/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=153 재전송 (사유=timeout, 재시도 4/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=151 재전송 (사유=timeout, 재시도 5/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=153 재전송 (사유=timeout, 재시도 5/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=153 NACK 수신 (result_code=10)
+[smoke_session_send][log] seq=153 재전송 (사유=NACK, 재시도 6/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=153 ACK 수신 (154/7825)
+[smoke_session_send] 진행 154/7825 (배치 31/1565)
+[smoke_session_send][log] seq=151 재전송 (사유=timeout, 재시도 6/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=151 ACK 수신 (155/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 32 전송 시작 (seq=155..159, 5개)
+[smoke_session_send][log] seq=155 ACK 수신 (156/7825)
+[smoke_session_send][log] seq=156 ACK 수신 (157/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 157/7825 (배치 32/1565)
+[smoke_session_send][log] seq=157 ACK 수신 (158/7825)
+[smoke_session_send] 진행 158/7825 (배치 32/1565)
+[smoke_session_send][log] seq=159 ACK 수신 (159/7825)
+[smoke_session_send] 진행 159/7825 (배치 32/1565)
+[smoke_session_send][log] seq=158 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=158 ACK 수신 (160/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 33 전송 시작 (seq=160..164, 5개)
+[smoke_session_send][log] seq=160 ACK 수신 (161/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 161/7825 (배치 33/1565)
+[smoke_session_send][log] seq=162 ACK 수신 (162/7825)
+[smoke_session_send] 진행 162/7825 (배치 33/1565)
+[smoke_session_send][log] seq=164 ACK 수신 (163/7825)
+[smoke_session_send] 진행 163/7825 (배치 33/1565)
+[smoke_session_send][log] seq=161 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=163 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=161 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=163 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=161 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=163 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=161 재전송 (사유=timeout, 재시도 4/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=163 재전송 (사유=timeout, 재시도 4/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=161 재전송 (사유=timeout, 재시도 5/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=163 재전송 (사유=timeout, 재시도 5/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=163 NACK 수신 (result_code=10)
+[smoke_session_send][log] seq=163 재전송 (사유=NACK, 재시도 6/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=163 ACK 수신 (164/7825)
+[smoke_session_send] 진행 164/7825 (배치 33/1565)
+[smoke_session_send][log] seq=161 재전송 (사유=timeout, 재시도 6/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=161 재전송 (사유=timeout, 재시도 7/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=161 ACK 수신 (165/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 34 전송 시작 (seq=165..169, 5개)
+[smoke_session_send][log] seq=165 ACK 수신 (166/7825)
+[smoke_session_send][log] seq=166 ACK 수신 (167/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 167/7825 (배치 34/1565)
+[smoke_session_send][log] seq=167 ACK 수신 (168/7825)
+[smoke_session_send] 진행 168/7825 (배치 34/1565)
+[smoke_session_send][log] seq=169 ACK 수신 (169/7825)
+[smoke_session_send] 진행 169/7825 (배치 34/1565)
+[smoke_session_send][log] seq=168 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=168 ACK 수신 (170/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 35 전송 시작 (seq=170..174, 5개)
+[smoke_session_send][log] seq=170 ACK 수신 (171/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 171/7825 (배치 35/1565)
+[smoke_session_send][log] seq=172 ACK 수신 (172/7825)
+[smoke_session_send] 진행 172/7825 (배치 35/1565)
+[smoke_session_send][log] seq=174 ACK 수신 (173/7825)
+[smoke_session_send] 진행 173/7825 (배치 35/1565)
+[smoke_session_send][log] seq=171 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=173 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send][log] seq=171 ACK 수신 (174/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 174/7825 (배치 35/1565)
+[smoke_session_send][log] seq=173 ACK 수신 (175/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 36 전송 시작 (seq=175..179, 5개)
+[smoke_session_send][log] seq=175 ACK 수신 (176/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 176/7825 (배치 36/1565)
+[smoke_session_send][log] seq=177 ACK 수신 (177/7825)
+[smoke_session_send] 진행 177/7825 (배치 36/1565)
+[smoke_session_send][log] seq=179 ACK 수신 (178/7825)
+[smoke_session_send] 진행 178/7825 (배치 36/1565)
+[smoke_session_send][log] seq=176 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=178 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=176 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=178 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=176 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=178 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=176 재전송 (사유=timeout, 재시도 4/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=178 재전송 (사유=timeout, 재시도 4/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=176 재전송 (사유=timeout, 재시도 5/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=178 재전송 (사유=timeout, 재시도 5/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=178 NACK 수신 (result_code=10)
+[smoke_session_send][log] seq=178 재전송 (사유=NACK, 재시도 6/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=178 ACK 수신 (179/7825)
+[smoke_session_send] 진행 179/7825 (배치 36/1565)
+[smoke_session_send][log] seq=176 재전송 (사유=timeout, 재시도 6/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=176 재전송 (사유=timeout, 재시도 7/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=176 ACK 수신 (180/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 37 전송 시작 (seq=180..184, 5개)
+[smoke_session_send][log] seq=180 ACK 수신 (181/7825)
+[smoke_session_send][log] seq=181 ACK 수신 (182/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 182/7825 (배치 37/1565)
+[smoke_session_send][log] seq=182 ACK 수신 (183/7825)
+[smoke_session_send] 진행 183/7825 (배치 37/1565)
+[smoke_session_send][log] seq=184 ACK 수신 (184/7825)
+[smoke_session_send] 진행 184/7825 (배치 37/1565)
+[smoke_session_send][log] seq=183 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=183 ACK 수신 (185/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 38 전송 시작 (seq=185..189, 5개)
+[smoke_session_send][log] seq=185 ACK 수신 (186/7825)
+[smoke_session_send][log] seq=186 ACK 수신 (187/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 187/7825 (배치 38/1565)
+[smoke_session_send][log] seq=187 ACK 수신 (188/7825)
+[smoke_session_send] 진행 188/7825 (배치 38/1565)
+[smoke_session_send][log] seq=189 ACK 수신 (189/7825)
+[smoke_session_send] 진행 189/7825 (배치 38/1565)
+[smoke_session_send][log] seq=188 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=188 ACK 수신 (190/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 39 전송 시작 (seq=190..194, 5개)
+[smoke_session_send][log] seq=190 ACK 수신 (191/7825)
+[smoke_session_send][log] seq=191 ACK 수신 (192/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 192/7825 (배치 39/1565)
+[smoke_session_send][log] seq=192 ACK 수신 (193/7825)
+[smoke_session_send] 진행 193/7825 (배치 39/1565)
+[smoke_session_send][log] seq=194 ACK 수신 (194/7825)
+[smoke_session_send] 진행 194/7825 (배치 39/1565)
+[smoke_session_send][log] seq=193 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=193 ACK 수신 (195/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 40 전송 시작 (seq=195..199, 5개)
+[smoke_session_send][log] seq=195 ACK 수신 (196/7825)
+[smoke_session_send][log] seq=196 ACK 수신 (197/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 197/7825 (배치 40/1565)
+[smoke_session_send][log] seq=197 ACK 수신 (198/7825)
+[smoke_session_send] 진행 198/7825 (배치 40/1565)
+[smoke_session_send][log] seq=199 ACK 수신 (199/7825)
+[smoke_session_send] 진행 199/7825 (배치 40/1565)
+[smoke_session_send][log] seq=198 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=198 ACK 수신 (200/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 41 전송 시작 (seq=200..204, 5개)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 200/7825 (배치 41/1565)
+[smoke_session_send][log] seq=203 ACK 수신 (201/7825)
+[smoke_session_send] 진행 201/7825 (배치 41/1565)
+[smoke_session_send][log] seq=200 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=201 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send][log] seq=200 ACK 수신 (202/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 202/7825 (배치 41/1565)
+[smoke_session_send][log] seq=202 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=201 ACK 수신 (203/7825)
+[smoke_session_send][log] seq=204 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 203/7825 (배치 41/1565)
+[smoke_session_send][log] seq=202 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=204 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send][log] seq=202 ACK 수신 (204/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 204/7825 (배치 41/1565)
+[smoke_session_send][log] seq=204 ACK 수신 (205/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 42 전송 시작 (seq=205..209, 5개)
+[smoke_session_send][log] seq=205 ACK 수신 (206/7825)
+[smoke_session_send][log] seq=206 ACK 수신 (207/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 207/7825 (배치 42/1565)
+[smoke_session_send][log] seq=207 ACK 수신 (208/7825)
+[smoke_session_send] 진행 208/7825 (배치 42/1565)
+[smoke_session_send][log] seq=209 ACK 수신 (209/7825)
+[smoke_session_send] 진행 209/7825 (배치 42/1565)
+[smoke_session_send][log] seq=208 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=208 ACK 수신 (210/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 43 전송 시작 (seq=210..214, 5개)
+[smoke_session_send][log] seq=210 ACK 수신 (211/7825)
+[smoke_session_send][log] seq=211 ACK 수신 (212/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 212/7825 (배치 43/1565)
+[smoke_session_send][log] seq=212 ACK 수신 (213/7825)
+[smoke_session_send] 진행 213/7825 (배치 43/1565)
+[smoke_session_send][log] seq=214 ACK 수신 (214/7825)
+[smoke_session_send] 진행 214/7825 (배치 43/1565)
+[smoke_session_send][log] seq=213 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=213 ACK 수신 (215/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 44 전송 시작 (seq=215..219, 5개)
+[smoke_session_send][log] seq=215 ACK 수신 (216/7825)
+[smoke_session_send][log] seq=216 ACK 수신 (217/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 217/7825 (배치 44/1565)
+[smoke_session_send][log] seq=217 ACK 수신 (218/7825)
+[smoke_session_send] 진행 218/7825 (배치 44/1565)
+[smoke_session_send][log] seq=219 ACK 수신 (219/7825)
+[smoke_session_send] 진행 219/7825 (배치 44/1565)
+[smoke_session_send][log] seq=218 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=218 ACK 수신 (220/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 45 전송 시작 (seq=220..224, 5개)
+[smoke_session_send][log] seq=220 ACK 수신 (221/7825)
+[smoke_session_send][log] seq=221 ACK 수신 (222/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 222/7825 (배치 45/1565)
+[smoke_session_send][log] seq=222 ACK 수신 (223/7825)
+[smoke_session_send] 진행 223/7825 (배치 45/1565)
+[smoke_session_send][log] seq=224 ACK 수신 (224/7825)
+[smoke_session_send] 진행 224/7825 (배치 45/1565)
+[smoke_session_send][log] seq=223 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=223 ACK 수신 (225/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 46 전송 시작 (seq=225..229, 5개)
+[smoke_session_send][log] seq=225 ACK 수신 (226/7825)
+[smoke_session_send][log] seq=226 ACK 수신 (227/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 227/7825 (배치 46/1565)
+[smoke_session_send][log] seq=227 ACK 수신 (228/7825)
+[smoke_session_send] 진행 228/7825 (배치 46/1565)
+[smoke_session_send][log] seq=229 ACK 수신 (229/7825)
+[smoke_session_send] 진행 229/7825 (배치 46/1565)
+[smoke_session_send][log] seq=228 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=228 ACK 수신 (230/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 47 전송 시작 (seq=230..234, 5개)
+[smoke_session_send][log] seq=230 ACK 수신 (231/7825)
+[smoke_session_send][log] seq=231 ACK 수신 (232/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 232/7825 (배치 47/1565)
+[smoke_session_send][log] seq=232 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=233 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=234 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send][log] seq=233 ACK 수신 (233/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 233/7825 (배치 47/1565)
+[smoke_session_send][log] seq=234 ACK 수신 (234/7825)
+[smoke_session_send] 진행 234/7825 (배치 47/1565)
+[smoke_session_send][log] seq=232 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=232 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=232 ACK 수신 (235/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 48 전송 시작 (seq=235..239, 5개)
+[smoke_session_send][log] seq=235 ACK 수신 (236/7825)
+[smoke_session_send][log] seq=236 ACK 수신 (237/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 237/7825 (배치 48/1565)
+[smoke_session_send][log] seq=237 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=238 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=239 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send][log] seq=238 ACK 수신 (238/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 238/7825 (배치 48/1565)
+[smoke_session_send][log] seq=239 ACK 수신 (239/7825)
+[smoke_session_send] 진행 239/7825 (배치 48/1565)
+[smoke_session_send][log] seq=237 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=237 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=237 ACK 수신 (240/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 49 전송 시작 (seq=240..244, 5개)
+[smoke_session_send][log] seq=240 ACK 수신 (241/7825)
+[smoke_session_send][log] seq=241 ACK 수신 (242/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 242/7825 (배치 49/1565)
+[smoke_session_send][log] seq=242 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=243 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=244 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send][log] seq=243 ACK 수신 (243/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 243/7825 (배치 49/1565)
+[smoke_session_send][log] seq=244 ACK 수신 (244/7825)
+[smoke_session_send] 진행 244/7825 (배치 49/1565)
+[smoke_session_send][log] seq=242 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=242 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=242 ACK 수신 (245/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 50 전송 시작 (seq=245..249, 5개)
+[smoke_session_send][log] seq=245 ACK 수신 (246/7825)
+[smoke_session_send][log] seq=246 ACK 수신 (247/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 247/7825 (배치 50/1565)
+[smoke_session_send][log] seq=247 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=248 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=249 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send][log] seq=248 ACK 수신 (248/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 248/7825 (배치 50/1565)
+[smoke_session_send][log] seq=249 ACK 수신 (249/7825)
+[smoke_session_send] 진행 249/7825 (배치 50/1565)
+[smoke_session_send][log] seq=247 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=247 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=247 ACK 수신 (250/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 51 전송 시작 (seq=250..254, 5개)
+[smoke_session_send][log] seq=250 ACK 수신 (251/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 251/7825 (배치 51/1565)
+[smoke_session_send][log] seq=251 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=252 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=253 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send][log] seq=252 ACK 수신 (252/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 252/7825 (배치 51/1565)
+[smoke_session_send][log] seq=254 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=253 ACK 수신 (253/7825)
+[smoke_session_send] 진행 253/7825 (배치 51/1565)
+[smoke_session_send][log] seq=254 ACK 수신 (254/7825)
+[smoke_session_send] 진행 254/7825 (배치 51/1565)
+[smoke_session_send][log] seq=251 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=251 ACK 수신 (255/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 52 전송 시작 (seq=255..259, 5개)
+[smoke_session_send][log] seq=255 ACK 수신 (256/7825)
+[smoke_session_send][log] seq=256 ACK 수신 (257/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 257/7825 (배치 52/1565)
+[smoke_session_send][log] seq=257 ACK 수신 (258/7825)
+[smoke_session_send] 진행 258/7825 (배치 52/1565)
+[smoke_session_send][log] seq=259 ACK 수신 (259/7825)
+[smoke_session_send] 진행 259/7825 (배치 52/1565)
+[smoke_session_send][log] seq=258 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=258 ACK 수신 (260/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 53 전송 시작 (seq=260..264, 5개)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 260/7825 (배치 53/1565)
+[smoke_session_send][log] seq=260 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=261 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=262 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=263 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=264 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=260 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=261 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=262 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=263 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=264 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=260 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=261 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send][log] seq=260 ACK 수신 (261/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 261/7825 (배치 53/1565)
+[smoke_session_send][log] seq=262 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=261 ACK 수신 (262/7825)
+[smoke_session_send][log] seq=263 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 262/7825 (배치 53/1565)
+[smoke_session_send][log] seq=264 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=264 ACK 수신 (263/7825)
+[smoke_session_send] 진행 263/7825 (배치 53/1565)
+[smoke_session_send][log] seq=262 재전송 (사유=timeout, 재시도 4/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=263 재전송 (사유=timeout, 재시도 4/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=263 ACK 수신 (264/7825)
+[smoke_session_send] 진행 264/7825 (배치 53/1565)
+[smoke_session_send][log] seq=262 재전송 (사유=timeout, 재시도 5/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=262 ACK 수신 (265/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 54 전송 시작 (seq=265..269, 5개)
+[smoke_session_send][log] seq=265 ACK 수신 (266/7825)
+[smoke_session_send][log] seq=266 ACK 수신 (267/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 267/7825 (배치 54/1565)
+[smoke_session_send][log] seq=267 ACK 수신 (268/7825)
+[smoke_session_send] 진행 268/7825 (배치 54/1565)
+[smoke_session_send][log] seq=269 ACK 수신 (269/7825)
+[smoke_session_send] 진행 269/7825 (배치 54/1565)
+[smoke_session_send][log] seq=268 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=268 ACK 수신 (270/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 55 전송 시작 (seq=270..274, 5개)
+[smoke_session_send][log] seq=270 ACK 수신 (271/7825)
+[smoke_session_send][log] seq=271 ACK 수신 (272/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 272/7825 (배치 55/1565)
+[smoke_session_send][log] seq=272 ACK 수신 (273/7825)
+[smoke_session_send] 진행 273/7825 (배치 55/1565)
+[smoke_session_send][log] seq=274 ACK 수신 (274/7825)
+[smoke_session_send] 진행 274/7825 (배치 55/1565)
+[smoke_session_send][log] seq=273 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=273 ACK 수신 (275/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 56 전송 시작 (seq=275..279, 5개)
+[smoke_session_send][log] seq=275 ACK 수신 (276/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 276/7825 (배치 56/1565)
+[smoke_session_send][log] seq=277 ACK 수신 (277/7825)
+[smoke_session_send] 진행 277/7825 (배치 56/1565)
+[smoke_session_send][log] seq=279 ACK 수신 (278/7825)
+[smoke_session_send] 진행 278/7825 (배치 56/1565)
+[smoke_session_send][log] seq=276 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=278 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=276 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=278 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=276 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=278 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=276 재전송 (사유=timeout, 재시도 4/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=278 재전송 (사유=timeout, 재시도 4/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=276 재전송 (사유=timeout, 재시도 5/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=278 재전송 (사유=timeout, 재시도 5/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send][log] seq=276 ACK 수신 (279/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 279/7825 (배치 56/1565)
+[smoke_session_send][log] seq=278 ACK 수신 (280/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 57 전송 시작 (seq=280..284, 5개)
+[smoke_session_send][log] seq=280 ACK 수신 (281/7825)
+[smoke_session_send][log] seq=281 ACK 수신 (282/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 282/7825 (배치 57/1565)
+[smoke_session_send][log] seq=282 ACK 수신 (283/7825)
+[smoke_session_send] 진행 283/7825 (배치 57/1565)
+[smoke_session_send][log] seq=284 ACK 수신 (284/7825)
+[smoke_session_send] 진행 284/7825 (배치 57/1565)
+[smoke_session_send][log] seq=283 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=283 ACK 수신 (285/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 58 전송 시작 (seq=285..289, 5개)
+[smoke_session_send][log] seq=285 ACK 수신 (286/7825)
+[smoke_session_send][log] seq=286 ACK 수신 (287/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 287/7825 (배치 58/1565)
+[smoke_session_send][log] seq=287 ACK 수신 (288/7825)
+[smoke_session_send] 진행 288/7825 (배치 58/1565)
+[smoke_session_send][log] seq=289 ACK 수신 (289/7825)
+[smoke_session_send] 진행 289/7825 (배치 58/1565)
+[smoke_session_send][log] seq=288 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=288 ACK 수신 (290/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 59 전송 시작 (seq=290..294, 5개)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 290/7825 (배치 59/1565)
+[smoke_session_send][log] seq=293 ACK 수신 (291/7825)
+[smoke_session_send] 진행 291/7825 (배치 59/1565)
+[smoke_session_send][log] seq=290 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=291 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send][log] seq=290 ACK 수신 (292/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 292/7825 (배치 59/1565)
+[smoke_session_send][log] seq=292 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=291 ACK 수신 (293/7825)
+[smoke_session_send][log] seq=294 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 293/7825 (배치 59/1565)
+[smoke_session_send][log] seq=292 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=294 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send][log] seq=292 ACK 수신 (294/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 294/7825 (배치 59/1565)
+[smoke_session_send][log] seq=294 ACK 수신 (295/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 60 전송 시작 (seq=295..299, 5개)
+[smoke_session_send][log] seq=295 ACK 수신 (296/7825)
+[smoke_session_send][log] seq=296 ACK 수신 (297/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 297/7825 (배치 60/1565)
+[smoke_session_send][log] seq=297 ACK 수신 (298/7825)
+[smoke_session_send] 진행 298/7825 (배치 60/1565)
+[smoke_session_send][log] seq=299 ACK 수신 (299/7825)
+[smoke_session_send] 진행 299/7825 (배치 60/1565)
+[smoke_session_send][log] seq=298 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=298 ACK 수신 (300/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 61 전송 시작 (seq=300..304, 5개)
+[smoke_session_send][log] seq=300 ACK 수신 (301/7825)
+[smoke_session_send][log] seq=301 ACK 수신 (302/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 302/7825 (배치 61/1565)
+[smoke_session_send][log] seq=302 ACK 수신 (303/7825)
+[smoke_session_send] 진행 303/7825 (배치 61/1565)
+[smoke_session_send][log] seq=304 ACK 수신 (304/7825)
+[smoke_session_send] 진행 304/7825 (배치 61/1565)
+[smoke_session_send][log] seq=303 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=303 ACK 수신 (305/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 62 전송 시작 (seq=305..309, 5개)
+[smoke_session_send][log] seq=305 ACK 수신 (306/7825)
+[smoke_session_send][log] seq=306 ACK 수신 (307/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 307/7825 (배치 62/1565)
+[smoke_session_send][log] seq=307 ACK 수신 (308/7825)
+[smoke_session_send] 진행 308/7825 (배치 62/1565)
+[smoke_session_send][log] seq=309 ACK 수신 (309/7825)
+[smoke_session_send] 진행 309/7825 (배치 62/1565)
+[smoke_session_send][log] seq=308 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=308 ACK 수신 (310/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 63 전송 시작 (seq=310..314, 5개)
+[smoke_session_send][log] seq=310 ACK 수신 (311/7825)
+[smoke_session_send][log] seq=311 ACK 수신 (312/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 312/7825 (배치 63/1565)
+[smoke_session_send][log] seq=312 ACK 수신 (313/7825)
+[smoke_session_send] 진행 313/7825 (배치 63/1565)
+[smoke_session_send][log] seq=314 ACK 수신 (314/7825)
+[smoke_session_send] 진행 314/7825 (배치 63/1565)
+[smoke_session_send][log] seq=313 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=313 ACK 수신 (315/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 64 전송 시작 (seq=315..319, 5개)
+[smoke_session_send][log] seq=315 ACK 수신 (316/7825)
+[smoke_session_send][log] seq=316 ACK 수신 (317/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 317/7825 (배치 64/1565)
+[smoke_session_send][log] seq=317 ACK 수신 (318/7825)
+[smoke_session_send] 진행 318/7825 (배치 64/1565)
+[smoke_session_send][log] seq=319 ACK 수신 (319/7825)
+[smoke_session_send] 진행 319/7825 (배치 64/1565)
+[smoke_session_send][log] seq=318 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=318 ACK 수신 (320/7825)
+[smoke_session_send] 상태 -> SendingBatch
+[smoke_session_send][log] 배치 65 전송 시작 (seq=320..324, 5개)
+[smoke_session_send][log] seq=320 ACK 수신 (321/7825)
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send] 진행 321/7825 (배치 65/1565)
+[smoke_session_send][log] seq=322 ACK 수신 (322/7825)
+[smoke_session_send] 진행 322/7825 (배치 65/1565)
+[smoke_session_send][log] seq=321 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=323 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=324 재전송 (사유=timeout, 재시도 1/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=321 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=323 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=324 재전송 (사유=timeout, 재시도 2/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=324 ACK 수신 (323/7825)
+[smoke_session_send] 진행 323/7825 (배치 65/1565)
+[smoke_session_send][log] seq=321 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=323 재전송 (사유=timeout, 재시도 3/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=321 재전송 (사유=timeout, 재시도 4/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=323 재전송 (사유=timeout, 재시도 4/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=321 재전송 (사유=timeout, 재시도 5/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=323 재전송 (사유=timeout, 재시도 5/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=321 재전송 (사유=timeout, 재시도 6/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=323 재전송 (사유=timeout, 재시도 6/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=321 재전송 (사유=timeout, 재시도 7/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=323 재전송 (사유=timeout, 재시도 7/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=323 NACK 수신 (result_code=10)
+[smoke_session_send][log] seq=323 재전송 (사유=NACK, 재시도 8/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] seq=323 ACK 수신 (324/7825)
+[smoke_session_send] 진행 324/7825 (배치 65/1565)
+[smoke_session_send][log] seq=321 재전송 (사유=timeout, 재시도 8/8)
+[smoke_session_send] 상태 -> Retransmitting
+[smoke_session_send] 상태 -> WaitingBatchAck
+[smoke_session_send][log] FAIL: 배치 재전송 한도(8회) 초과 (sequence=321)
+[smoke_session_send] 상태 -> Failed
+[smoke_session_send] 실패: 배치 재전송 한도(8회) 초과 (sequence=321)

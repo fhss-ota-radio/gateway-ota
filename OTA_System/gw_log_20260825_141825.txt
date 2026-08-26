@@ -1,0 +1,17 @@
+[TeeLogger] 로그 파일: gw_log_20260825_141825.txt
+[smoke_session_send] device=/dev/cc1101 file=/home/root/gateway-ota/firmware/fhss-ota-radio.bin target=0xa29e60 batchSize=5 chunkDelayMs=40 timeoutMs=600 maxRetry=8
+[smoke_session_send] transport open 성공
+[smoke_session_send] 상태 -> Handshaking
+[smoke_session_send] 세션 시작 session_id=0x142f0d9d
+[smoke_session_send][log] START NACK 수신 (result_code=9)
+[smoke_session_send][log] START NACK 수신 (result_code=9)
+[smoke_session_send][log] START NACK 수신 (result_code=9)
+[smoke_session_send][log] START NACK 수신 (result_code=9)
+[smoke_session_send][log] START NACK 수신 (result_code=9)
+[smoke_session_send][log] START NACK 수신 (result_code=9)
+[smoke_session_send][log] START NACK 수신 (result_code=9)
+[smoke_session_send][log] START NACK 수신 (result_code=9)
+[smoke_session_send][log] START NACK 수신 (result_code=9)
+[smoke_session_send][log] FAIL: 핸드셰이크 실패 — NACK, 8회 재시도 초과
+[smoke_session_send] 상태 -> Failed
+[smoke_session_send] 실패: 핸드셰이크 실패 — NACK, 8회 재시도 초과

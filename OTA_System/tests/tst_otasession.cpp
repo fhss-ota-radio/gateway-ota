@@ -160,6 +160,50 @@ void happyPathCompletesAcrossMultipleBatches()
     std::cout << "[OK] happyPathCompletesAcrossMultipleBatches\n";
 }
 
+// Fixed-channel CC1101은 반이중이고 ESP32 수신기는 DATA마다 ACK을 송신한 뒤
+// RX로 돌아온다. batchSize=1인 stop-and-wait 설정에서는 현재 DATA의 ACK이
+// 오기 전 다음 DATA를 절대 송신하지 않아야 한다. 이 보장이 깨지면 다시
+// ACK TX와 다음 DATA가 충돌하는 5/40ms 실기기 패턴으로 돌아간다.
+void fixedStopAndWaitKeepsOnlyOneDataInFlight()
+{
+    const std::string path = writeTempFile("os_stopwait.bin", repeat('P', 48 * 3));
+    constexpr uint32_t kSessionId = 0x13572468u;
+
+    FakeTransport transport;
+    OtaSession session(transport, /*batchSize=*/1, /*timeoutMs=*/600,
+                       /*maxRetry=*/20, /*chunkDelayMs=*/0);
+
+    session.start(path, 1, kSessionId, 1000);
+    transport.rxQueue.push_back(
+        makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_START, OTA_CONTROL_SEQUENCE));
+    session.tick(1010);
+    assert(transport.countSentOfType(OTA_PKT_DATA) == 1);
+
+    // ACK 없이 여러 tick이 지나도 timeout 전에는 seq1을 보내면 안 된다.
+    session.tick(1100);
+    session.tick(1500);
+    assert(transport.countSentOfType(OTA_PKT_DATA) == 1);
+    assert(session.progress().ackedChunks == 0);
+
+    // seq0 ACK을 적용한 같은 tick에서 다음 단일 배치(seq1)가 시작된다.
+    transport.rxQueue.push_back(
+        makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_DATA, 0));
+    session.tick(1510);
+    assert(transport.countSentOfType(OTA_PKT_DATA) == 2);
+    assert(session.progress().ackedChunks == 1);
+
+    // seq1 ACK 전에는 마지막 seq2도 송신하지 않는다.
+    session.tick(1600);
+    assert(transport.countSentOfType(OTA_PKT_DATA) == 2);
+    transport.rxQueue.push_back(
+        makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_DATA, 1));
+    session.tick(1610);
+    assert(transport.countSentOfType(OTA_PKT_DATA) == 3);
+
+    std::remove(path.c_str());
+    std::cout << "[OK] fixedStopAndWaitKeepsOnlyOneDataInFlight\n";
+}
+
 // 청크 하나만 NACK -> 그 슬롯만 즉시 재전송(타임아웃 안 기다림). 같은 배치의
 // 다른 슬롯은 건드리지 않는지 확인 (Selective-Repeat, Go-Back-N 아님).
 void nackRetransmitsOnlyThatChunkImmediately()
@@ -645,6 +689,7 @@ void drainQueueSeesFreshAckInSameTickAsStaleNack()
 int main()
 {
     happyPathCompletesAcrossMultipleBatches();
+    fixedStopAndWaitKeepsOnlyOneDataInFlight();
     nackRetransmitsOnlyThatChunkImmediately();
     timeoutTriggersResendOfSameChunk();
     batchMaxRetryExceededLeadsToFailed();

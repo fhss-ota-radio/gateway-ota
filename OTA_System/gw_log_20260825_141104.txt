@@ -1,0 +1,17 @@
+[TeeLogger] 로그 파일: gw_log_20260825_141104.txt
+[smoke_session_send] device=/dev/cc1101 file=/home/root/gateway-ota/firmware/fhss-ota-radio.bin target=0xa29e60 batchSize=5 chunkDelayMs=40 timeoutMs=600 maxRetry=8
+[smoke_session_send] transport open 성공
+[smoke_session_send] 상태 -> Handshaking
+[smoke_session_send] 세션 시작 session_id=0x340642c9
+[smoke_session_send][log] START 응답 타임아웃 (재시도 1/8)
+[smoke_session_send][log] START 응답 타임아웃 (재시도 2/8)
+[smoke_session_send][log] START 응답 타임아웃 (재시도 3/8)
+[smoke_session_send][log] START 응답 타임아웃 (재시도 4/8)
+[smoke_session_send][log] START 응답 타임아웃 (재시도 5/8)
+[smoke_session_send][log] START 응답 타임아웃 (재시도 6/8)
+[smoke_session_send][log] START 응답 타임아웃 (재시도 7/8)
+[smoke_session_send][log] START 응답 타임아웃 (재시도 8/8)
+[smoke_session_send][log] START 응답 타임아웃 (재시도 9/8)
+[smoke_session_send][log] FAIL: 핸드셰이크 실패 — 8회 재시도 후에도 응답 없음
+[smoke_session_send] 상태 -> Failed
+[smoke_session_send] 실패: 핸드셰이크 실패 — 8회 재시도 후에도 응답 없음

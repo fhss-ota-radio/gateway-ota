@@ -33,6 +33,7 @@
 #include "fhssrollout.h"
 #include "otasession.h"
 #include "slotawaretransport.h"
+#include "teelogger.h" // gw_log_YYYYMMDD_HHMMSS.txt 자동 저장 (teelogger.h 상단 주석 참고)
 
 #include <chrono>
 #include <cstdio>
@@ -115,6 +116,12 @@ constexpr int kSyncSettleMs = 4000;
 
 int main(int argc, char *argv[])
 {
+    // [2026-08-25] 맨 처음(사용법 출력보다도 먼저) 로그 파일부터 열어야
+    // 그 이후의 모든 std::cout/cerr(사용법 오류 포함)까지 다 잡힌다 —
+    // teelogger.h 상단 주석 참고. 148 실기기 테스트에서 "이 실행에 대응하는
+    // Gateway 로그가 없다"는 문제가 실제로 있었음(design-notes 73절).
+    TeeLogger logger("gw_log");
+
     if (argc < 6) {
         printUsage(argv[0]);
         return 1;
@@ -178,15 +185,16 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    // [1단계] 이전 실행의 호핑 잔존을 정리 — ota_smoke_fhss_activate와 동일한
-    // 이유(design-notes 42절 2~4차 시도 참고). 이번 CLI는 곧바로 다시
-    // 호핑을 켤 것이므로 실질적 영향은 크지 않지만, 시작 시점을 항상 같은
-    // 상태로 맞추는 관례를 그대로 따른다.
-    (void)transport.stopFhss();
-    if (transport.setChannel(0) != Cc1101Status::Ok)
-        std::cerr << "[fhss_ota] setChannel(0) 실패 — 그래도 계속 진행\n";
-    if (transport.startRx() != Cc1101Status::Ok)
-        std::cerr << "[fhss_ota] startRx 실패 — 그래도 계속 진행\n";
+    // [1단계, 2026-08-26에 resetToFixedChannel()로 통합] 이전 실행의 호핑
+    // 잔존을 정리 — ota_smoke_fhss_activate와 동일한 이유(design-notes 42절
+    // 2~4차 시도 참고). 이번 CLI는 곧바로 다시 호핑을 켤 것이므로 실질적
+    // 영향은 크지 않지만, 시작 시점을 항상 같은 상태로 맞추는 관례를 그대로
+    // 따른다. 예전엔 이 자리에서 stopFhss/setChannel(0)/startRx만 하고
+    // flushRx()는 빠져 있었는데(사소한 누락), 공용 메서드로 옮기며 자연히
+    // 채워짐. 실패해도 계속 진행하는 기존 동작 그대로 유지(반환값 무시).
+    (void)transport.resetToFixedChannel([](const std::string &msg) {
+        std::cerr << "[fhss_ota] " << msg << " — 그래도 계속 진행\n";
+    });
 
     FhssHopPolicy policy;
     policy.generation = generation;

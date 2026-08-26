@@ -5,6 +5,65 @@ project(OTA_System LANGUAGES CXX)
 # (core/·transport/에서 Qt 타입을 제거한 결정, docs/note/design-notes-gateway-ota-es.md 참고)
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets)
 
+# ---------- 빌드 버전 정보 (build_info.h.in 참고) ----------
+# [2026-08-25] cmake를 다시 돌릴 때(=재빌드할 때)마다 그 시점의 git 커밋
+# 해시/브랜치를 자동으로 build/generated/build_info.h에 채워 넣는다.
+# 사람이 커밋마다 버전 문자열을 손으로 바꿀 필요가 없고, 실기기(라즈베리
+# 파이)에서 "지금 이 바이너리가 최신 커밋으로 재빌드된 게 맞는지" 창
+# 제목/시작 로그만 보고 바로 확인할 수 있게 하려는 목적 — build_info.h.in
+# 상단 주석에 배경 정리.
+find_package(Git QUIET)
+set(OTA_SYSTEM_GIT_HASH "unknown")
+set(OTA_SYSTEM_GIT_BRANCH "unknown")
+set(OTA_SYSTEM_GIT_DIRTY 0)
+if(Git_FOUND)
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} rev-parse --short=8 HEAD
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        OUTPUT_VARIABLE OTA_SYSTEM_GIT_HASH
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} rev-parse --abbrev-ref HEAD
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        OUTPUT_VARIABLE OTA_SYSTEM_GIT_BRANCH
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    # 커밋 안 된 로컬 변경이 있는 상태로 빌드하면 표시가 실제 커밋 해시와
+    # 안 맞을 수 있으므로("-dirty" 표시로 구분) — porcelain 출력이 비어있지
+    # 않으면 변경사항이 있다는 뜻.
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} status --porcelain
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        OUTPUT_VARIABLE OTA_SYSTEM_GIT_STATUS
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if(NOT "${OTA_SYSTEM_GIT_STATUS}" STREQUAL "")
+        set(OTA_SYSTEM_GIT_DIRTY 1)
+    endif()
+    if("${OTA_SYSTEM_GIT_HASH}" STREQUAL "")
+        set(OTA_SYSTEM_GIT_HASH "unknown")
+    endif()
+    if("${OTA_SYSTEM_GIT_BRANCH}" STREQUAL "")
+        set(OTA_SYSTEM_GIT_BRANCH "unknown")
+    endif()
+endif()
+if(OTA_SYSTEM_GIT_DIRTY)
+    set(OTA_SYSTEM_GIT_DIRTY_SUFFIX ", 커밋 안 된 로컬 변경 있음(dirty)")
+else()
+    set(OTA_SYSTEM_GIT_DIRTY_SUFFIX "")
+endif()
+message(STATUS "OTA_System 빌드 버전: ${OTA_SYSTEM_GIT_HASH} (${OTA_SYSTEM_GIT_BRANCH}${OTA_SYSTEM_GIT_DIRTY_SUFFIX})")
+
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/build_info.h.in
+    ${CMAKE_CURRENT_BINARY_DIR}/generated/build_info.h
+    @ONLY
+)
+
 qt_standard_project_setup()
 
 # ---------- ota-protocol: firmware-esp32와 공유하는 OTA 패킷 규격 ----------
@@ -93,6 +152,44 @@ target_link_libraries(OTA_System
         Qt::Widgets
         ota_core
 )
+
+# build_info.h가 소스 트리가 아니라 빌드 폴더(${CMAKE_CURRENT_BINARY_DIR}/generated)에
+# 생성되므로, 이 include 경로를 추가해야 main.cpp/otamanager.cpp에서
+# #include "build_info.h"로 찾을 수 있음.
+target_include_directories(OTA_System
+    PRIVATE
+        ${CMAKE_CURRENT_BINARY_DIR}/generated
+)
+
+# [2026-08-25] 한글 폰트를 실행 파일 옆에 배포 (main.cpp의 loadKoreanFont() 참고)
+#
+# 라즈베리파이 욕토 이미지엔 CJK 폰트가 없을 수 있어서, 폰트 파일 자체를
+# 실행 파일과 함께 둔다. $<TARGET_FILE_DIR:...>를 써서 build/install 양쪽
+# 다 실행 파일이 실제로 있는 폴더로 복사되게 함(맥 MACOSX_BUNDLE이어도
+# .app/Contents/MacOS/ 안으로 정확히 맞춰짐 — 다만 맥은 시스템에 이미
+# 한글 폰트가 있어서 이 파일이 없어도 앱이 죽지는 않음, loadKoreanFont()의
+# 폴백 참고).
+#
+# 폰트 파일 자체(resources/fonts/NotoSansCJK-Regular.ttc)는 이 커밋에
+# 아직 없음 — Google Noto Fonts 공식 배포본을 받아 이 경로에 추가해야
+# 실제로 복사됨(없으면 COMMAND가 조용히 실패하지 않고 CMake 설정 단계
+# 에서 빌드가 멈추도록 존재 여부를 EXISTS로 먼저 확인).
+set(OTA_SYSTEM_FONT_FILE
+    ${CMAKE_CURRENT_SOURCE_DIR}/resources/fonts/NotoSansCJK-Regular.ttc)
+if(EXISTS ${OTA_SYSTEM_FONT_FILE})
+    add_custom_command(TARGET OTA_System POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${OTA_SYSTEM_FONT_FILE}
+            $<TARGET_FILE_DIR:OTA_System>/NotoSansCJK-Regular.ttc
+        COMMENT "한글 폰트를 실행 파일 옆으로 복사")
+    install(FILES ${OTA_SYSTEM_FONT_FILE}
+        DESTINATION ${CMAKE_INSTALL_BINDIR})
+else()
+    message(WARNING
+        "OTA_System: ${OTA_SYSTEM_FONT_FILE} 없음 — 한글 폰트 없이 빌드됨"
+        " (라즈베리파이에선 한글이 깨져 보일 수 있음, main.cpp의"
+        " loadKoreanFont() 참고). Google Noto Fonts에서 받아 추가하세요.")
+endif()
 
 install(TARGETS OTA_System
     BUNDLE  DESTINATION .
@@ -245,6 +342,18 @@ add_executable(ota_smoke_fhss_activate
     tests/smoke_fhss_activate_main.cpp
 )
 target_link_libraries(ota_smoke_fhss_activate
+    PRIVATE
+        ota_core
+)
+
+# FHSS 잔여 호핑 상태를 정리하고 채널 0 고정으로 되돌리기만 하는 최소
+# CLI — ota_smoke_session_send(비호핑) 직전에 한 번 실행하는 용도.
+# 2026-08-25, 148 실기기에서 이전 실행이 남긴 커널 호핑 상태 때문에
+# 비호핑 테스트가 막힌 사례로 필요성 확인(design-notes 73절).
+add_executable(ota_smoke_fhss_reset
+    tests/smoke_fhss_reset_main.cpp
+)
+target_link_libraries(ota_smoke_fhss_reset
     PRIVATE
         ota_core
 )

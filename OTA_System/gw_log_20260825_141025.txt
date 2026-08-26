@@ -1,0 +1,4 @@
+[TeeLogger] 로그 파일: gw_log_20260825_141025.txt
+[smoke_session_send] device=/dev/cc1101 file=/home/root/firmware/fhss-ota-radio.bin target=0xa29e60 batchSize=5 chunkDelayMs=40 timeoutMs=600 maxRetry=8
+[smoke_session_send] transport open 성공
+[smoke_session_send] start() 실패: 파일을 열 수 없습니다: /home/root/firmware/fhss-ota-radio.bin

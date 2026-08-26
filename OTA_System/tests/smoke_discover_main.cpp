@@ -47,48 +47,14 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    // [2026-08-24 추가] DISCOVER/FHSS_CONFIG/FHSS_ACTIVATE는 호핑 시작 전
-    // "부트스트랩 채널 0"에서 주고받는다. 그런데 FHSS 호핑은 이 프로세스가
-    // 끝나도 커널 드라이버 레벨에서 계속 돈다 — smoke_fhss_activate_main.cpp
-    // 127행 주석과 동일한 이유로, startFhss()를 부른 이전 실행(예:
-    // ota_smoke_fhss_ota_transfer)이 stopFhss() 없이 죽거나 그냥 끝나면
-    // 칩은 여전히 1~8번 채널을 계속 호핑 중인 채로 남는다. 그 상태에서
-    // 이 도구가 startRx()만 부르고 DISCOVER를 쏘면, ESP32(MENU_OTA, 채널
-    // 0 고정)와 Gateway가 같은 채널에 있는 짧은 순간에만 우연히 만나므로
-    // 사실상 "응답 없음"만 계속 나온다 — 148/149 실기기에서 이 증상으로
-    // 재현됨(팀원 리뷰로 원인 확인, 2026-08-24). smoke_fhss_activate_main.cpp
-    // 145~165행처럼 매번 명시적으로 정지+채널0 고정+FIFO 비우기를 하고,
-    // 여기 실패는 원인을 숨기지 않도록 그냥 진행하지 않고 종료한다.
-    const Cc1101Status stopStatus = transport.stopFhss();
-    if (stopStatus != Cc1101Status::Ok) {
-        std::cerr << "stopFhss 실패 (코드=" << static_cast<int>(stopStatus)
-                   << ") — 커널 드라이버가 호핑 중일 수 있는데 정지가 안 됨\n";
-        return 1;
-    }
-
-    const Cc1101Status channelStatus = transport.setChannel(0);
-    if (channelStatus != Cc1101Status::Ok) {
-        std::cerr << "setChannel(0) 실패 (코드=" << static_cast<int>(channelStatus)
-                   << ")\n";
-        return 1;
-    }
-
-    // 이전 세션이 남긴 패킷이나 RXFIFO_OVERFLOW 상태가 섞여 들어오지
-    // 않도록 FIFO를 비운 뒤 RX로 재진입한다. flushRx()는 FLUSH_RX ioctl만
-    // 하고 RX 재진입은 안 해주므로 startRx()를 별도로 불러야 한다
-    // (cc1101transport.cpp 209~222행 참고).
-    transport.flushRx();
-    if (transport.lastStatus() != Cc1101Status::Ok) {
-        std::cerr << "flushRx 실패 (코드=" << static_cast<int>(transport.lastStatus())
-                   << ")\n";
-        return 1;
-    }
-
-    if (transport.startRx() != Cc1101Status::Ok) {
-        std::cerr << "startRx 실패 (코드=" << static_cast<int>(transport.lastStatus())
-                   << ")\n";
-        return 1;
-    }
+    // [2026-08-24 추가, 2026-08-25 discoverDevices()로 이동] FHSS 잔류 상태
+    // (이전 실행이 stopFhss() 없이 끝나서 커널 드라이버가 여전히 호핑 중인
+    // 상태) 정리는 예전엔 여기서 직접 했지만, 지금은 discoverDevices()가
+    // (CC1101이면) 항상 알아서 해준다 — otamanager.cpp(Qt 화면)가 이 리셋을
+    // 안 하고 있던 문제가 실기기로 발견돼서, 각 호출부가 따로 챙기는 대신
+    // discoverDevices() 하나로 모았다(session/discovery.cpp
+    // resetLeftoverFhssStateIfCc1101() 참고). 이 CLI는 startRx()를 별도로
+    // 부를 필요도 없어졌다.
 
     std::cout << "[discover] OTA_DISCOVER 브로드캐스트 전송, " << waitMs
                << "ms 동안 응답 대기...\n";

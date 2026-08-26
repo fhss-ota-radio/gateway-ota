@@ -1,21 +1,31 @@
 #include "otamanager.h"
 #include "ui_otamanager.h"
 
+#include "build_info.h" // cmake가 생성 — OTA_SYSTEM_GIT_HASH 등 (build_info.h.in 참고)
+
 #include "cc1101transport.h" // Cc1101Transport — onConnectClicked()에서 실제로 생성
 #include "fhssrollout.h"     // FhssHopPolicy/rolloutFhssConfig() — FHSS CONFIG/ACTIVATE 핸드셰이크
+#include "slotawaretransport.h" // SlotAwareTransport — Task #6, onStartClicked()의 호핑 경로에서 사용
 
 extern "C" {
 #include "ota_protocol.h" // OTA_BROADCAST_DEVICE_ID
 }
 
 #include <QCloseEvent>
+#include <QCoreApplication>
 #include <QDateTime>
+#include <QDebug>
+#include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QLabel>
+#include <QStatusBar>
 #include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QRegularExpressionValidator>
 #include <QSettings>
+#include <QStringConverter>
+#include <QTextStream>
 #include <QThread>
 #include <QTimer>
 
@@ -26,6 +36,24 @@ OtaManager::OtaManager(QWidget *parent)
     , ui(new Ui::OtaManager)
 {
     ui->setupUi(this);
+
+    // [2026-08-25] 로그 자동 파일 저장 — 실행 파일 옆 logs/ 폴더에 실행마다
+    // 새 파일(ota_YYYYMMDD_HHMMSS.log)을 만듦. appendLog()가 나중에 이
+    // m_logFile을 쓰므로, appendLog()를 처음 부르기 전(setupConnections()
+    // 보다 먼저)에 열어야 함. mkpath()는 이미 폴더가 있어도 안전(무해)함.
+    const QString logDirPath = QCoreApplication::applicationDirPath() + QStringLiteral("/logs");
+    QDir().mkpath(logDirPath);
+    const QString logFileName = QStringLiteral("ota_%1.log")
+        .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")));
+    m_logFile.setFileName(logDirPath + QStringLiteral("/") + logFileName);
+    if (m_logFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        qDebug() << "로그 파일:" << m_logFile.fileName();
+    } else {
+        // 파일을 못 열어도(권한 문제 등) 화면 로그창은 정상 동작해야 하므로
+        // 여기서 앱을 막지 않음 — appendLog()가 m_logFile.isOpen()을 확인함.
+        qWarning() << "로그 파일을 열지 못함:" << m_logFile.fileName();
+    }
+
     setupConnections();
     loadSettings();
 
@@ -52,17 +80,39 @@ OtaManager::OtaManager(QWidget *parent)
     connect(m_fhssStatusTimer, &QTimer::timeout, this, &OtaManager::onFhssStatusTick);
     m_fhssStatusTimer->start();
 
+    // [2026-08-25] 창 제목(main.cpp)과 별개로 로그(=파일에도 자동 저장됨,
+    // 위 m_logFile 주석 참고)에도 남겨서, GUI를 안 보고 로그 파일만 봐도
+    // 어느 커밋으로 빌드됐는지 바로 확인 가능하게 함.
+    const QString versionText =
+        tr("%1%2 (%3)")
+            .arg(QStringLiteral(OTA_SYSTEM_GIT_HASH),
+                 OTA_SYSTEM_GIT_DIRTY ? QStringLiteral("-dirty") : QString(),
+                 QStringLiteral(OTA_SYSTEM_GIT_BRANCH));
+    appendLog(QStringLiteral("INFO"),
+              tr("빌드 버전: %1, 빌드 시각: %2")
+                  .arg(versionText, QStringLiteral(OTA_SYSTEM_BUILD_TIMESTAMP)));
+
+    // [2026-08-25] 창 제목(main.cpp의 setWindowTitle())은 라즈베리파이 VNC
+    // 화면(QT_QPA_PLATFORM=vnc, 윈도우 매니저 없는 헤드리스 방식)에서
+    // 제목표시줄 자체가 안 그려져서 안 보임 — OS 창틀이 아니라 화면
+    // "내용물" 안에 있어야 VNC에서도 보이므로, QMainWindow가 기본 제공하는
+    // 상태표시줄(statusBar(), otamanager.ui의 statusbar)에 상시 라벨로 띄움.
+    auto *versionLabel = new QLabel(tr("빌드: %1").arg(versionText), this);
+    statusBar()->addPermanentWidget(versionLabel);
+
     appendLog(QStringLiteral("INFO"), tr("화면 초기화 완료"));
 }
 
 OtaManager::~OtaManager()
 {
-    // m_session이 m_transport를 참조(ITransport&)로 들고 있어서, m_transport가
-    // 먼저 사라지면 안 됨 — unique_ptr 소멸 순서는 선언 역순(m_tickTimer,
-    // m_session, m_transport 순으로 선언했으니 소멸은 그 반대)이라 자동으로
-    // m_session이 m_transport보다 먼저 사라져서 문제없지만, 명시적으로 한 번
-    // 더 순서를 강제해서 이 불변조건이 헤더 선언 순서에 몰래 의존하지 않게 함.
+    // m_session이 m_transport(또는 m_slotAwareTransport)를 참조(ITransport&)로
+    // 들고 있어서, 참조 대상이 먼저 사라지면 안 됨. 게다가 m_slotAwareTransport
+    // 자신도 Cc1101Transport&로 m_transport 내부를 참조하므로(호핑 모드일 때만
+    // 존재, otamanager.h 주석 참고) 순서가 반드시 m_session -> m_slotAwareTransport
+    // -> m_transport여야 함. 선언 순서(자동 소멸은 그 역순)에 몰래 기대지 않고
+    // 여기서 명시적으로 강제함.
     m_session.reset();
+    m_slotAwareTransport.reset();
     m_transport.reset();
     delete ui;
 }
@@ -144,10 +194,46 @@ Cc1101Transport *OtaManager::fhssTransport() const
     return dynamic_cast<Cc1101Transport *>(m_transport.get());
 }
 
+bool OtaManager::prepareFixedOta(Cc1101Transport *transport, const QString &context)
+{
+    if (!transport) {
+        appendLog(QStringLiteral("ERROR"), tr("%1: CC1101 transport를 찾을 수 없음").arg(context));
+        return false;
+    }
+
+    // [2026-08-26] 여기 있던 stopFhss->setChannel(0)->flushRx->startRx 4단계를
+    // Cc1101Transport::resetToFixedChannel()로 옮김 — ota_smoke_fhss_reset_main.cpp/
+    // ota_smoke_session_send_main.cpp와 동일한 구현을 셋이 나눠 쓰도록 통합
+    // (cc1101transport.h 주석 참고). 여기선 Qt 로그(appendLog)로 감싸기만 함.
+    const bool ok = transport->resetToFixedChannel([this, &context](const std::string &msg) {
+        appendLog(QStringLiteral("ERROR"),
+                  tr("%1: %2").arg(context, QString::fromStdString(msg)));
+    });
+    if (!ok)
+        return false;
+
+    appendLog(QStringLiteral("INFO"), tr("%1: 비호핑 채널 0 준비 완료").arg(context));
+    return true;
+}
+
 void OtaManager::appendLog(const QString &tag, const QString &message)
 {
     const QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss.zzz"));
-    ui->logView->appendPlainText(QStringLiteral("%1 [%2] %3").arg(timestamp, tag, message));
+    const QString line = QStringLiteral("%1 [%2] %3").arg(timestamp, tag, message);
+    ui->logView->appendPlainText(line);
+
+    // [2026-08-25] 화면 로그창은 앱이 죽으면(강제종료, killall 등) 같이
+    // 사라짐 — "배치 재전송 한도 초과" 같은 실패 원인을 나중에 다시 보려면
+    // 파일로도 남아 있어야 함. 매 줄마다 바로 flush해서, 비정상 종료돼도
+    // 그 직전까지의 로그는 확실히 디스크에 남게 함(생성자의 m_logFile 주석
+    // 참고).
+    if (m_logFile.isOpen()) {
+        QTextStream out(&m_logFile);
+        out.setEncoding(QStringConverter::Utf8);
+        out << line << '\n';
+        out.flush();
+        m_logFile.flush();
+    }
 }
 
 void OtaManager::recalcChunkInfo()
@@ -203,6 +289,11 @@ void OtaManager::onConnectClicked()
             ui->fhssStopButton->setEnabled(false);
         }
         m_session.reset();
+        // [2026-08-25, Task #6] m_slotAwareTransport가 m_transport(정확히는
+        // fhssTransport()가 가리키는 Cc1101Transport)를 참조로 들고 있으므로
+        // (otamanager.h 주석 참고), m_transport를 close/reset하기 전에 먼저
+        // 비워야 함 — ~OtaManager()의 같은 순서 강제와 동일한 이유.
+        m_slotAwareTransport.reset();
         if (m_transport)
             m_transport->close();
         m_transport.reset();
@@ -231,8 +322,7 @@ void OtaManager::onConnectClicked()
     // 빠져 있으면 DISCOVER_ACK/ACK/NACK을 하나도 못 받는다 — CLI 도구들
     // (ota_smoke_discover 등)은 전부 open() 직후 startRx()를 부르는데
     // 이 화면 코드엔 없었음. 상세 경위: design-notes-gateway-ota-es.md 44절
-    if (transport->startRx() != Cc1101Status::Ok) {
-        appendLog(QStringLiteral("ERROR"), tr("CC1101 연결 실패: startRx 실패"));
+    if (!prepareFixedOta(transport.get(), tr("CC1101 연결"))) {
         transport->close();
         return;
     }
@@ -323,15 +413,71 @@ void OtaManager::onStartClicked()
     // 한 번이 하나의 세션"이라는 개념을 일관되게 유지, 로그 추적도 쉬움).
     // 0을 넘기면(FHSS 비활성 또는 대상이 다름) OtaSession이 내부적으로
     // 새 session_id를 무작위 생성함(otasession.h start() 기본값 0의 의미).
-    const uint32_t sessionIdToReuse =
-        (m_fhssActive && targetDeviceId == m_fhssTargetDeviceId) ? m_fhssSessionId : 0;
+    const bool useHopping = m_fhssActive && targetDeviceId == m_fhssTargetDeviceId;
+    const uint32_t sessionIdToReuse = useHopping ? m_fhssSessionId : 0;
 
     m_retransmitEventCount = 0;
-    // otasession.h 67~72행 기본값(batchSize=5, timeoutMs=300, maxRetry=5,
-    // chunkDelayMs=40) 그대로 씀 — 전부 실기기 검증으로 확정된 값
-    // (docs/roadmap.md 3절)
-    m_session = std::make_unique<OtaSession>(*m_transport);
+
+    // 세션을 새로 만들기 전에 먼저 정리 — m_session이 참조로 들고 있는
+    // transport(m_slotAwareTransport 또는 m_transport)를 아래에서 바꿀 수도
+    // 있으므로, 옛 세션의 참조부터 끊어야 함(otamanager.h m_slotAwareTransport
+    // 주석 참고). onStartClicked() 위쪽 가드(324~329행)가 "진행 중" 상태는
+    // 이미 막아놨으므로 여기 남아있는 m_session은 Idle/Completed/Failed뿐임.
+    m_session.reset();
+
+    // [2026-08-25, Task #6] "FHSS 활성화"가 이 대상과 돼 있는지에 따라 완전히
+    // 다른 두 CLI 도구의 로직을 그대로 재사용한다 — 새로 로직을 안 짜고
+    // 이미 실기기 검증된 조합을 그대로 씀(왜 이렇게 나눴는지는 위 useHopping
+    // 계산에 쓰인 m_fhssActive/session_id 재사용 주석과 같은 맥락).
+    if (useHopping) {
+        // tests/smoke_fhss_ota_transfer_main.cpp 259~269행과 동일:
+        // SlotAwareTransport로 감싸고, batchSize=5/timeoutMs=300/maxRetry=20/
+        // chunkDelayMs=0을 씀. maxRetry가 평소(5)보다 4배 큰 이유는 ESP32가
+        // 호핑 중 SYNC를 잃으면 재동기화에 최악 3.3초 걸릴 수 있어서
+        // (위 kFhssSyncSettleMs 주석과 같은 근거) — 5회(약 1초)로는 그 전에
+        // Gateway가 먼저 포기해버림(design-notes 56절). chunkDelayMs=0인
+        // 이유는 SlotAwareTransport가 슬롯 게이팅으로 패킷 간격을 자체적으로
+        // 소유해서, OtaSession이 별도로 또 delay를 주면 이중으로 느려지기
+        // 때문.
+        Cc1101Transport *cc1101 = fhssTransport();
+        if (!cc1101) {
+            // FHSS가 활성화될 수 있었다는 건 fhssTransport()가 이미 한 번
+            // 성공했다는 뜻이라 사실상 도달 안 하는 분기지만, m_transport가
+            // 연결 해제/재연결 등으로 바뀌었을 가능성을 대비해 방어적으로 확인.
+            appendLog(QStringLiteral("ERROR"), tr("FHSS 전송 실패: CC1101 transport를 찾을 수 없음"));
+            return;
+        }
+        m_slotAwareTransport =
+            std::make_unique<SlotAwareTransport>(*cc1101, m_fhssGeneration, m_fhssSlotDurationUs);
+        m_session = std::make_unique<OtaSession>(*m_slotAwareTransport, /*batchSize=*/5,
+                                                  /*timeoutMs=*/300, /*maxRetry=*/20,
+                                                  /*chunkDelayMs=*/0);
+    } else {
+        // 호핑을 안 쓸 땐 SlotAwareTransport 자체가 필요 없음 — 있으면
+        // m_transport를 계속 붙들고 있어서(생성자가 참조를 저장) 다음번
+        // 연결 해제 등에서 혼란을 줄 수 있으므로 확실히 비워둠.
+        m_slotAwareTransport.reset();
+        Cc1101Transport *cc1101 = fhssTransport();
+        if (!prepareFixedOta(cc1101, tr("비호핑 OTA 시작")))
+            return;
+        // CC1101은 반이중이고 현재 ESP32 fixed OTA 경로는 DATA 하나를 받은 뒤
+        // ACK 송신을 끝내고 RX로 복귀해야 다음 DATA를 받을 수 있다. 여기서
+        // batch=5/delay=40ms로 여러 DATA를 밀어 넣으면 ACK TX 중인 ESP32와
+        // 다음 DATA가 충돌한다. 2026-08-25 성공 로그에서는 seq%5==3의
+        // 90.2%가 재전송됐고 전체 전송이 46분까지 늘었다.
+        //
+        // fixed OTA는 한 번에 DATA 하나만 outstanding으로 두고 ACK을 받은 뒤
+        // 다음 청크를 보내는 stop-and-wait로 맞춘다. ACK이 pacing 역할을
+        // 하므로 별도의 chunk delay는 필요 없다. FHSS 경로의 batch=5 설정은
+        // 위 분기에 그대로 유지한다.
+        m_session = std::make_unique<OtaSession>(*m_transport, /*batchSize=*/1,
+                                                  /*timeoutMs=*/600, /*maxRetry=*/20,
+                                                  /*chunkDelayMs=*/0);
+    }
     m_session->setOnStateChanged([this](OtaSessionState state) { handleSessionStateChanged(state); });
+    m_session->setOnLog([this](const std::string &message) {
+        appendLog(QStringLiteral("OTA"), QString::fromStdString(message));
+    });
 
     if (!m_session->start(m_selectedFilePath.toStdString(), targetDeviceId, sessionIdToReuse)) {
         appendLog(QStringLiteral("ERROR"),
@@ -493,6 +639,14 @@ void OtaManager::onDiscoverClicked()
     // m_transport를 동시에 건드리면 안 됨 — 그래서 위에서 세션 진행 중이면
     // 막았고, onStartClicked()/onConnectClicked() 쪽에도 m_discovering 검사를
     // 추가해서 조회가 끝나기 전엔 세션 시작·연결 해제를 못 하게 막아둠.
+    //
+    // [2026-08-25] DISCOVER 전 FHSS 잔류 상태 초기화(이전엔 이 화면 경로에만
+    // 빠져 있던 CLI 전용 리셋이었음 — 실기기로 재현된 문제)는 이제
+    // discoverDevices() 자신이 CC1101이면 항상 해준다(session/discovery.cpp
+    // resetLeftoverFhssStateIfCc1101() 참고). 이 화면은 CLI와 마찬가지로
+    // discoverDevices()만 부르면 되고, 리셋을 따로 신경 쓸 필요가 없다 —
+    // "CLI로 검증한 로직을 화면도 그대로 쓴다"는 원칙을 지키기 위해 화면
+    // 전용으로 따로 만들지 않았다.
     ITransport *transport = m_transport.get();
     QThread *worker = QThread::create([this, transport]() {
         const std::vector<DiscoveredDevice> devices = discoverDevices(*transport, 1000);
@@ -638,15 +792,14 @@ void OtaManager::onFhssActivateClicked()
                 this, [this, msg]() { appendLog(QStringLiteral("FHSS"), msg); }, Qt::QueuedConnection);
         };
 
-        // [smoke_fhss_activate_main.cpp 127~166행과 동일한 순서] 이전 실행이
-        // 호핑 상태를 남겨뒀을 수 있으므로 CONFIG를 보내기 전에 항상 정리 —
-        // stopFhss()는 내부적으로 채널을 reserved_channel(0)로 되돌리지만,
-        // 명시적으로 setChannel(0)도 한 번 더 해서 상태를 확실히 맞춤.
-        (void)transport->stopFhss();
-        if (transport->setChannel(0) != Cc1101Status::Ok)
-            logLine(QStringLiteral("setChannel(0) 실패 — 계속 진행"));
-        if (transport->startRx() != Cc1101Status::Ok)
-            logLine(QStringLiteral("startRx 실패 — 계속 진행"));
+        // [smoke_fhss_activate_main.cpp 127~166행과 동일한 순서, 2026-08-26에
+        // resetToFixedChannel()로 통합] 이전 실행이 호핑 상태를 남겨뒀을 수
+        // 있으므로 CONFIG를 보내기 전에 항상 정리 — 실패해도 계속 진행하는
+        // 기존 동작 그대로 유지(반환값 무시). 예전엔 flushRx()가 빠져 있었는데
+        // 공용 메서드로 옮기며 자연히 채워짐.
+        (void)transport->resetToFixedChannel([&logLine](const std::string &msg) {
+            logLine(QString::fromStdString(msg) + QStringLiteral(" — 계속 진행"));
+        });
 
         FhssHopPolicy policy;
         policy.generation = generation;
@@ -715,10 +868,17 @@ void OtaManager::onFhssActivateClicked()
             return;
         }
 
-        // ESP32가 랑데부 채널에서 SYNC_ACQUIRED까지 가는 데 보통 1~2초 걸림
-        // (smoke_fhss_ota_transfer_main.cpp 76~81행 주석과 같은 값/이유) —
-        // 그 전에 OTA_START를 보내면 응답이 없을 수 있어서 여유를 두고 기다림.
-        constexpr int kFhssSyncSettleMs = 2000;
+        // [2026-08-25 정정: 2000 -> 4000] smoke_fhss_ota_transfer_main.cpp
+        // 83~107행에 기록된 실기기 교착 버그와 완전히 같은 값이라 여기도
+        // 그대로 맞춤. 요약: Gateway는 이미 여러 채널을 순회 중이라 ESP32가
+        // 기다리는 랑데부 채널로 돌아오는 주기가 최악 2.4초(300ms x 8슬롯)
+        // + 첫 SYNC 획득까지 0.9초 = 최악 3.3초 걸릴 수 있다. 2000ms만
+        // 기다리고 OTA_START/DATA를 먼저 보내버리면, 아직 SEARCHING 단계인
+        // ESP32가 그 DATA 처리에 밀려 다음 SYNC를 놓치고 랑데부로 되돌아가는
+        // 일이 반복돼 영원히 TRACKING에 못 가고 결국 ESP32의 동기화
+        // 타임아웃으로 세션이 폐기된다(148 실기기 로그로 재현됨). 최악
+        // 3.3초 + 여유를 둬서 4000ms.
+        constexpr int kFhssSyncSettleMs = 4000;
         QThread::msleep(kFhssSyncSettleMs);
 
         const auto status = transport->getFhssStatus();
@@ -740,6 +900,13 @@ void OtaManager::onFhssActivateClicked()
     // 여기서 미리 저장해둠(실패해도 남아있는 게 무해함 — m_fhssActive가
     // false인 한 onStartClicked()의 session_id 재사용 조건에서 안 걸림).
     m_fhssTargetDeviceId = targetDeviceId;
+    // [2026-08-25, Task #6] generation도 같은 이유로 미리 저장 — 이후
+    // onStartClicked()가 SlotAwareTransport(transport, generation,
+    // slotDurationUs)를 만들 때 "이번에 실제로 활성화에 쓴 값"을 그대로
+    // 넘겨야 하므로(otamanager.h m_fhssGeneration 주석 참고). slotDurationUs는
+    // 위 policy.slotDurationUs와 항상 같은 고정값(300000)이라 멤버 기본값
+    // 그대로 둠.
+    m_fhssGeneration = generation;
 }
 
 void OtaManager::onFhssStopClicked()

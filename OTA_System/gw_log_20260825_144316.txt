@@ -1,0 +1,2 @@
+[TeeLogger] 로그 파일: gw_log_20260825_144316.txt
+[fhss_reset] 완료 — CC1101이 채널 0, 비호핑 상태로 정리됨. 이제 ota_smoke_session_send를 실행하세요.

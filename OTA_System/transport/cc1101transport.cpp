@@ -31,6 +31,40 @@ Cc1101Transport::~Cc1101Transport()
     close();
 }
 
+// [2026-08-26 추가] cc1101transport.h의 resetToFixedChannel() 주석 참고.
+// 플랫폼 ifdef 블록 *밖*에 하나만 둔다 — 여기서 부르는 stopFhss()/
+// setChannel()/flushRx()/startRx() 각각이 이미 위 ifdef로 리눅스 실구현과
+// mac 스텁을 갖고 있어서, 이 함수 자체는 그 넷을 순서대로 호출하기만 하면
+// 되고 플랫폼을 몰라도 됨(스텁 환경에서는 setChannel()이 NotInitialized를
+// 돌려주므로 자연히 false로 끝남).
+bool Cc1101Transport::resetToFixedChannel(const std::function<void(const std::string &)> &onStageLog)
+{
+    // 멱등 동작 — 이미 호핑이 꺼져 있어도 성공 취급되고, 실패해도 치명적이지
+    // 않아 반환값을 무시함(smoke_fhss_activate_main.cpp 127행 이후 관례와 동일).
+    (void)stopFhss();
+
+    if (setChannel(0) != Cc1101Status::Ok) {
+        if (onStageLog)
+            onStageLog("setChannel(0) 실패");
+        return false;
+    }
+
+    flushRx();
+    if (m_lastStatus != Cc1101Status::Ok) {
+        if (onStageLog)
+            onStageLog("flushRx 실패");
+        return false;
+    }
+
+    if (startRx() != Cc1101Status::Ok) {
+        if (onStageLog)
+            onStageLog("startRx 실패");
+        return false;
+    }
+
+    return true;
+}
+
 #if defined(__linux__)
 // ================= 리눅스(라즈베리파이) 실구현 =================
 

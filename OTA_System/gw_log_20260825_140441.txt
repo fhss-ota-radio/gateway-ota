@@ -1,0 +1,2 @@
+[TeeLogger] 로그 파일: gw_log_20260825_140441.txt
+[fhss_reset] transport open 실패: /dev/cc1101

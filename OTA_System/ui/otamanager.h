@@ -5,6 +5,7 @@
 #include "itransport.h"  // ITransport — core/session과 같은 이유로 Qt 의존성 없음, 화면 헤더에
 #include "otasession.h"  // 직접 include해도 안전함 (cstdint/functional/string/vector만 씀)
 
+#include <QFile>
 #include <QMainWindow>
 #include <QString>
 
@@ -23,6 +24,9 @@ QT_END_NAMESPACE
 // 이 타입의 멤버(stopFhss() 등)를 씀. fhssTransport() 존재 이유는 아래
 // 주석 참고.
 class Cc1101Transport;
+// SlotAwareTransport도 Cc1101Transport와 같은 이유로 전방 선언만 함 — 실제
+// 정의(및 include)는 otamanager.cpp에서만 필요(m_slotAwareTransport 주석 참고).
+class SlotAwareTransport;
 
 class OtaManager : public QMainWindow
 {
@@ -83,6 +87,7 @@ private:
     // 성공하지만, 나중에 다른 ITransport 구현체가 생기면 그때는 nullptr이
     // 돌아올 수 있어 호출부마다 null 체크 필요).
     Cc1101Transport *fhssTransport() const;
+    bool prepareFixedOta(Cc1101Transport *transport, const QString &context);
 
     // otamanager.ui에서 setupUi()가 채워주는 위젯 트리 (portEdit, connectButton,
     // unicastRadio/broadcastRadio, targetCombo, selectFileButton,
@@ -93,11 +98,27 @@ private:
     QString m_selectedFilePath;
     qint64 m_selectedFileSize = 0;
 
+    // [2026-08-25] appendLog()가 화면 로그창(ui->logView)과 동시에 이 파일에도
+    // 매 줄을 기록함 — 실행 방식(터미널 직접 실행/tmux/백그라운드 무엇이든)
+    // 과 무관하게 항상 전송 로그가 디스크에 남게 하기 위함. 이전엔
+    // "./OTA_System > /tmp/ota.log 2>&1"처럼 쉘 리다이렉트에 의존했는데, 그건
+    // qDebug()/stderr만 받고 정작 중요한 appendLog()의 [INFO]/[WARN]/[ERROR]
+    // 전송 로그는 못 받았음(otamanager.cpp appendLog() 주석 참고). 생성자에서
+    // 딱 한 번 열고 앱 종료까지 계속 씀.
+    QFile m_logFile;
+
     // 화면이 소유하는 실제 전송 계층 + 세션. 둘 다 "연결"/"전송 시작" 버튼을
     // 누르기 전까지는 비어있다(nullptr) — otasession.h/itransport.h가 Qt 의존성
     // 없는 순수 C++이라 unique_ptr로 그대로 들고 있을 수 있음.
     std::unique_ptr<ITransport> m_transport;
     std::unique_ptr<OtaSession> m_session;
+    // [2026-08-25, Task #6] FHSS 호핑 중 전송할 때만 만듦(onStartClicked()가
+    // m_fhssActive 여부로 분기) — OtaSession이 ITransport&로 참조만 들고
+    // 있어서, 세션이 살아있는 동안은 이 객체도 반드시 살아있어야 함(그래서
+    // OtaManager가 소유). tests/smoke_fhss_ota_transfer_main.cpp 259~269행과
+    // 동일한 조합(SlotAwareTransport로 감싼 뒤 그 위에 OtaSession)을 그대로
+    // 재사용 — CLI로 이미 실기기 검증된 로직을 화면에서 새로 짜지 않기 위함.
+    std::unique_ptr<SlotAwareTransport> m_slotAwareTransport;
     QTimer *m_tickTimer = nullptr; // OtaSession::tick()을 10ms마다 호출 (otasession.h 84행 주석 그대로)
     int m_retransmitEventCount = 0; // ackStatusLabel의 "재전송 N회" 표시용 — Retransmitting 상태 진입 횟수 근사치
     bool m_discovering = false; // DISCOVER 워커 스레드가 도는 동안 true — 중복 클릭/m_transport 동시접근 방지
@@ -109,6 +130,13 @@ private:
     bool m_fhssActive = false; // 활성화 성공 + Gateway 커널 MASTER 호핑이 켜진 상태
     uint32_t m_fhssSessionId = 0;      // FHSS_CONFIG/ACTIVATE에 쓴 session_id — 이후 OtaSession::start()에 그대로 재사용
     uint32_t m_fhssTargetDeviceId = 0; // 활성화 당시 targetCombo에서 골랐던 대상(활성화 후 콤보가 바뀌어도 유지)
+    // [2026-08-25, Task #6] 활성화 당시 실제로 쓴 generation/slotDurationUs —
+    // onStartClicked()가 SlotAwareTransport를 만들 때 그대로 넘겨줘야 함.
+    // fhssGenerationSpin은 활성화 성공 직후 다음 번 값으로 자동 +1 되므로
+    // (handleFhssActivationResult() 참고) 그 스핀박스를 그대로 다시 읽으면
+    // 이번에 실제 쓴 값이 아니게 됨 — 그래서 별도로 저장해둠.
+    uint32_t m_fhssGeneration = 0;
+    uint32_t m_fhssSlotDurationUs = 300000; // FHSS_CONFIG/ACTIVATE 때와 항상 같은 고정값(300000)
     QTimer *m_fhssStatusTimer = nullptr; // 활성화 중일 때만 getFhssStatus()를 주기 호출(500ms)해 fhssStatusLabel 갱신
 };
 #endif // OTAMANAGER_H

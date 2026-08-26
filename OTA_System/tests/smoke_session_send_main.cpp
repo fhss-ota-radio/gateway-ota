@@ -20,11 +20,12 @@
 //   ota_smoke_session_send <device_path> <bin_file> [target_device_id_hex] [batchSize] [chunkDelayMs]
 //
 //   target_device_id_hex  생략 시 브로드캐스트(ffffffff)
-//   batchSize             생략 시 5 (docs/fsm-design.md 결정값)
-//   chunkDelayMs          생략 시 40 (2026-08-17 실기기 검증으로 확정된 값)
+//   batchSize             생략 시 1 (fixed OTA 반이중 stop-and-wait)
+//   chunkDelayMs          생략 시 0 (ACK 수신이 다음 DATA pacing 역할)
 
 #include "cc1101transport.h"
 #include "otasession.h"
+#include "teelogger.h" // gw_log_YYYYMMDD_HHMMSS.txt 자동 저장 (teelogger.h 상단 주석 참고)
 
 extern "C" {
 #include "ota_protocol.h"
@@ -66,15 +67,18 @@ void printUsage(const char *argv0)
               << " <device_path> <bin_file> [target_device_id_hex] [batchSize] [chunkDelayMs]"
                  " [timeoutMs] [maxRetry]\n"
               << "  예: " << argv0 << " /dev/cc1101 firmware.bin\n"
-              << "  예: " << argv0 << " /dev/cc1101 firmware.bin ffffffff 5 40\n"
-              << "  예(여유값, 2026-08-20 실기기에서 stale NACK로 재시도 한도 초과 관찰돼\n"
-              << "     추가됨): " << argv0 << " /dev/cc1101 firmware.bin ffffffff 5 40 600 8\n";
+              << "  예(기본 stop-and-wait): " << argv0
+              << " /dev/cc1101 firmware.bin ffffffff 1 0\n"
+              << "  예(명시적 timeout/retry): " << argv0
+              << " /dev/cc1101 firmware.bin ffffffff 1 0 600 20\n";
 }
 
 } // namespace
 
 int main(int argc, char *argv[])
 {
+    TeeLogger logger("gw_log"); // 맨 처음(사용법 오류 포함) — smoke_fhss_ota_transfer_main.cpp와 동일 이유
+
     if (argc < 3) {
         printUsage(argv[0]);
         return 1;
@@ -89,14 +93,17 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    const int batchSize = (argc >= 5) ? std::atoi(argv[4]) : 5;
-    const int chunkDelayMs = (argc >= 6) ? std::atoi(argv[5]) : 40;
-    // [2026-08-20 추가] 기본값(300ms/5회, fsm-design.md 결정값)은 ESP32의
-    // "아직 못 받음" NACK 재전송 주기(500ms)보다 짧아서, 실기기에서 둘의
-    // 리듬이 어긋나며 재시도 예산을 너무 빨리 써버리는 경우가 관찰됨
-    // (design-notes 37절). 여유값이 필요하면 인자로 넘길 수 있게 함.
-    const int timeoutMs = (argc >= 7) ? std::atoi(argv[6]) : 300;
-    const int maxRetry = (argc >= 8) ? std::atoi(argv[7]) : 5;
+    // ESP32 fixed OTA 수신기는 DATA마다 ACK 송신을 마친 뒤 RX로 복귀한다.
+    // 기본값 5/40ms는 ACK TX와 다음 DATA가 충돌해 특정 배치 위치가 반복
+    // 유실됐다. 명시 인자는 성능 실험을 위해 그대로 허용하되, 기본 실행은
+    // 한 패킷의 ACK을 확인한 뒤 다음 패킷을 보내는 안전한 stop-and-wait다.
+    const int batchSize = (argc >= 5) ? std::atoi(argv[4]) : 1;
+    const int chunkDelayMs = (argc >= 6) ? std::atoi(argv[5]) : 0;
+    // Qt fixed OTA와 같은 복구 여유를 기본값으로 사용한다. stop-and-wait라
+    // 정상 전송에서는 이 타임아웃을 기다리지 않고 ACK 즉시 다음 DATA로
+    // 진행하므로, 값을 늘려도 정상 처리량은 낮아지지 않는다.
+    const int timeoutMs = (argc >= 7) ? std::atoi(argv[6]) : 600;
+    const int maxRetry = (argc >= 8) ? std::atoi(argv[7]) : 20;
 
     std::cout << "[smoke_session_send] device=" << devicePath << " file=" << binFile
               << " target=0x" << std::hex << targetDeviceId << std::dec
@@ -110,8 +117,20 @@ int main(int argc, char *argv[])
     }
     std::cout << "[smoke_session_send] transport open 성공\n";
 
-    if (transport.startRx() != Cc1101Status::Ok)
-        std::cerr << "[smoke_session_send] startRx 실패 — 응답 수신이 안 될 수 있음(계속 진행함)\n";
+    // [2026-08-26 추가] 예전엔 startRx()만 부르고 stopFhss()/setChannel(0)/
+    // flushRx()는 안 해서, 이전 실행이 남긴 FHSS 호핑 상태가 있으면 그대로
+    // 이어받는 문제가 있었음(ota_smoke_fhss_reset_main.cpp 주석, design-notes
+    // 73절) — 그래서 지금까지는 이 프로그램 실행 전에 ota_smoke_fhss_reset을
+    // 손으로 먼저 돌려야 했음. Cc1101Transport::resetToFixedChannel()로
+    // 그 4단계(stopFhss->setChannel(0)->flushRx->startRx)를 여기 안에 바로
+    // 넣어서, 이제 이 프로그램 하나만 실행해도 항상 깨끗한 상태에서 시작함.
+    if (!transport.resetToFixedChannel([](const std::string &msg) {
+            std::cerr << "[smoke_session_send] " << msg << "\n";
+        })) {
+        std::cerr << "[smoke_session_send] 리셋 실패 — 전송 시작 안 함\n";
+        transport.close();
+        return 1;
+    }
 
     OtaSession session(transport, batchSize, timeoutMs, maxRetry, chunkDelayMs);
 
