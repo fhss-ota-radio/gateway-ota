@@ -113,8 +113,20 @@ int main(int argc, char *argv[])
     }
     std::cout << "[smoke_session_send] transport open 성공\n";
 
-    if (transport.startRx() != Cc1101Status::Ok)
-        std::cerr << "[smoke_session_send] startRx 실패 — 응답 수신이 안 될 수 있음(계속 진행함)\n";
+    // [2026-08-26 추가] 예전엔 startRx()만 부르고 stopFhss()/setChannel(0)/
+    // flushRx()는 안 해서, 이전 실행이 남긴 FHSS 호핑 상태가 있으면 그대로
+    // 이어받는 문제가 있었음(ota_smoke_fhss_reset_main.cpp 주석, design-notes
+    // 73절) — 그래서 지금까지는 이 프로그램 실행 전에 ota_smoke_fhss_reset을
+    // 손으로 먼저 돌려야 했음. Cc1101Transport::resetToFixedChannel()로
+    // 그 4단계(stopFhss->setChannel(0)->flushRx->startRx)를 여기 안에 바로
+    // 넣어서, 이제 이 프로그램 하나만 실행해도 항상 깨끗한 상태에서 시작함.
+    if (!transport.resetToFixedChannel([](const std::string &msg) {
+            std::cerr << "[smoke_session_send] " << msg << "\n";
+        })) {
+        std::cerr << "[smoke_session_send] 리셋 실패 — 전송 시작 안 함\n";
+        transport.close();
+        return 1;
+    }
 
     OtaSession session(transport, batchSize, timeoutMs, maxRetry, chunkDelayMs);
 

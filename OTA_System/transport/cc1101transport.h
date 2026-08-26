@@ -5,6 +5,7 @@
 #include "itransport.h"
 
 #include <cstdint>
+#include <functional>
 #include <string>
 
 // ITransport의 CC1101 구현체.
@@ -59,6 +60,30 @@ public:
     Cc1101Status startFhss(Cc1101FhssRole role);
     Cc1101Status stopFhss();
     Cc1101FhssStatus getFhssStatus();
+
+    // [2026-08-26 추가] 비호핑 고정채널(0) 리셋 —
+    // stopFhss()->setChannel(0)->flushRx()->startRx() 4단계를 한 곳에 모음.
+    //
+    // 왜 필요한가: 이 4단계가 원래 최소 4곳(ota_smoke_fhss_reset_main.cpp,
+    // smoke_fhss_ota_transfer_main.cpp, otamanager.cpp의 prepareFixedOta()/
+    // onFhssActivateClicked())에서 각자 조금씩 다르게(일부는 flushRx 누락)
+    // 다시 구현되고 있었음 — "로직은 core에 한 곳, 호출부는 얇게" 원칙에
+    // 어긋나서 여기 하나로 통합함(design-notes-gateway-ota-es.md 참고).
+    //
+    // 호핑 경로에도 그대로 쓴다 — "리셋"은 호핑/비호핑 공통 시작 단계이고,
+    // 차이는 리셋 *다음*에 무엇을 하느냐뿐이다(비호핑은 여기서 끝, 호핑은
+    // 이어서 configureFhss()+startFhss()를 호출해 다시 호핑 상태로 전환).
+    //
+    // 한 단계라도 실패하면 그 즉시 false를 반환한다(이후 단계는 시도 안 함) —
+    // 이미 일관성이 깨진 상태에서 다음 단계를 계속해봐야 의미가 없어서.
+    // stopFhss()만 예외: 이미 호핑이 꺼져 있어도 성공 취급되는 멱등 동작이라
+    // 실패해도 무시하고 계속 진행함.
+    //
+    // onStageLog: 실패한 단계 이름을 알려주는 선택적 콜백(예: "setChannel(0)
+    // 실패"). CLI는 stderr에, Qt는 appendLog()에 넘겨서 각자 방식으로
+    // 로그를 남길 수 있게 함(rolloutFhssConfig()의 onLog 콜백과 같은 패턴).
+    // nullptr로 두면 조용히 성공/실패(bool)만 돌려줌.
+    bool resetToFixedChannel(const std::function<void(const std::string &)> &onStageLog = nullptr);
 
     // 마지막 recv() 성공 시 RSSI/LQI/CRC/수신시각 (cc1101-radio-api.md 4절)
     Cc1101RxMetadata lastRxMetadata() const { return m_lastRxMetadata; }

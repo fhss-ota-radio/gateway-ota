@@ -40,20 +40,13 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    // smoke_fhss_activate_main.cpp / smoke_fhss_ota_transfer_main.cpp
-    // 1단계와 완전히 동일한 순서·이유 — 실기기로 이미 검증된 정리 절차를
-    // 그대로 재사용(새 로직 아님).
-    bool ok = true;
-    (void)transport.stopFhss();
-    if (transport.setChannel(0) != Cc1101Status::Ok) {
-        std::cerr << "[fhss_reset] setChannel(0) 실패\n";
-        ok = false;
-    }
-    transport.flushRx();
-    if (transport.startRx() != Cc1101Status::Ok) {
-        std::cerr << "[fhss_reset] startRx 실패\n";
-        ok = false;
-    }
+    // [2026-08-26] smoke_fhss_activate_main.cpp / smoke_fhss_ota_transfer_main.cpp
+    // 1단계와 완전히 동일한 순서·이유였던 걸 Cc1101Transport::resetToFixedChannel()
+    // 하나로 통합함(cc1101transport.h 주석 참고) — 실기기로 이미 검증된 정리
+    // 절차를 그대로 재사용(새 로직 아님), 이제 이 파일도 그 공용 구현을 부르기만 함.
+    const bool ok = transport.resetToFixedChannel([](const std::string &msg) {
+        std::cerr << "[fhss_reset] " << msg << "\n";
+    });
 
     transport.close();
 

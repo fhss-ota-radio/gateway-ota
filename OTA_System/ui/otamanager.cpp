@@ -201,23 +201,16 @@ bool OtaManager::prepareFixedOta(Cc1101Transport *transport, const QString &cont
         return false;
     }
 
-    // ota_smoke_fhss_reset과 동일한 순서로 이전 실행의 FHSS/채널/FIFO 상태를
-    // 정리한다. stopFhss()는 이미 정지된 경우도 허용하고, 이후 단계는 하나라도
-    // 실패하면 전송을 시작하지 않는다.
-    (void)transport->stopFhss();
-    if (transport->setChannel(0) != Cc1101Status::Ok) {
-        appendLog(QStringLiteral("ERROR"), tr("%1: setChannel(0) 실패").arg(context));
+    // [2026-08-26] 여기 있던 stopFhss->setChannel(0)->flushRx->startRx 4단계를
+    // Cc1101Transport::resetToFixedChannel()로 옮김 — ota_smoke_fhss_reset_main.cpp/
+    // ota_smoke_session_send_main.cpp와 동일한 구현을 셋이 나눠 쓰도록 통합
+    // (cc1101transport.h 주석 참고). 여기선 Qt 로그(appendLog)로 감싸기만 함.
+    const bool ok = transport->resetToFixedChannel([this, &context](const std::string &msg) {
+        appendLog(QStringLiteral("ERROR"),
+                  tr("%1: %2").arg(context, QString::fromStdString(msg)));
+    });
+    if (!ok)
         return false;
-    }
-    transport->flushRx();
-    if (transport->lastStatus() != Cc1101Status::Ok) {
-        appendLog(QStringLiteral("ERROR"), tr("%1: flushRx 실패").arg(context));
-        return false;
-    }
-    if (transport->startRx() != Cc1101Status::Ok) {
-        appendLog(QStringLiteral("ERROR"), tr("%1: startRx 실패").arg(context));
-        return false;
-    }
 
     appendLog(QStringLiteral("INFO"), tr("%1: 비호핑 채널 0 준비 완료").arg(context));
     return true;
@@ -792,15 +785,14 @@ void OtaManager::onFhssActivateClicked()
                 this, [this, msg]() { appendLog(QStringLiteral("FHSS"), msg); }, Qt::QueuedConnection);
         };
 
-        // [smoke_fhss_activate_main.cpp 127~166행과 동일한 순서] 이전 실행이
-        // 호핑 상태를 남겨뒀을 수 있으므로 CONFIG를 보내기 전에 항상 정리 —
-        // stopFhss()는 내부적으로 채널을 reserved_channel(0)로 되돌리지만,
-        // 명시적으로 setChannel(0)도 한 번 더 해서 상태를 확실히 맞춤.
-        (void)transport->stopFhss();
-        if (transport->setChannel(0) != Cc1101Status::Ok)
-            logLine(QStringLiteral("setChannel(0) 실패 — 계속 진행"));
-        if (transport->startRx() != Cc1101Status::Ok)
-            logLine(QStringLiteral("startRx 실패 — 계속 진행"));
+        // [smoke_fhss_activate_main.cpp 127~166행과 동일한 순서, 2026-08-26에
+        // resetToFixedChannel()로 통합] 이전 실행이 호핑 상태를 남겨뒀을 수
+        // 있으므로 CONFIG를 보내기 전에 항상 정리 — 실패해도 계속 진행하는
+        // 기존 동작 그대로 유지(반환값 무시). 예전엔 flushRx()가 빠져 있었는데
+        // 공용 메서드로 옮기며 자연히 채워짐.
+        (void)transport->resetToFixedChannel([&logLine](const std::string &msg) {
+            logLine(QString::fromStdString(msg) + QStringLiteral(" — 계속 진행"));
+        });
 
         FhssHopPolicy policy;
         policy.generation = generation;
