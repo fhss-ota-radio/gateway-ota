@@ -20,7 +20,7 @@
 //   ota_smoke_session_send <device_path> <bin_file> [target_device_id_hex] [batchSize] [chunkDelayMs]
 //
 //   target_device_id_hex  생략 시 브로드캐스트(ffffffff)
-//   batchSize             생략 시 5 (docs/fsm-design.md 결정값)
+//   batchSize             생략 시 1 (stop-and-wait 비교 테스트)
 //   chunkDelayMs          생략 시 0 (ESP32 batch commit 후 deferred ACK 방식)
 
 #include "cc1101transport.h"
@@ -67,9 +67,9 @@ void printUsage(const char *argv0)
               << " <device_path> <bin_file> [target_device_id_hex] [batchSize] [chunkDelayMs]"
                  " [timeoutMs] [maxRetry]\n"
               << "  예: " << argv0 << " /dev/cc1101 firmware.bin\n"
-              << "  예: " << argv0 << " /dev/cc1101 firmware.bin ffffffff 5 0\n"
+              << "  예: " << argv0 << " /dev/cc1101 firmware.bin ffffffff 1 0\n"
               << "  예(여유값, 2026-08-20 실기기에서 stale NACK로 재시도 한도 초과 관찰돼\n"
-              << "     추가됨): " << argv0 << " /dev/cc1101 firmware.bin ffffffff 5 0 600 8\n";
+              << "     추가됨): " << argv0 << " /dev/cc1101 firmware.bin ffffffff 1 0 600 8\n";
 }
 
 } // namespace
@@ -92,7 +92,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    const int batchSize = (argc >= 5) ? std::atoi(argv[4]) : 5;
+    const int batchSize = (argc >= 5) ? std::atoi(argv[4]) : 1;
     const int chunkDelayMs = (argc >= 6) ? std::atoi(argv[5]) : 0;
     // [2026-08-20 추가] 기본값(300ms/5회, fsm-design.md 결정값)은 ESP32의
     // "아직 못 받음" NACK 재전송 주기(500ms)보다 짧아서, 실기기에서 둘의

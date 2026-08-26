@@ -56,8 +56,8 @@ struct OtaSessionProgress
 class OtaSession
 {
 public:
-    // batchSize/timeoutMs/maxRetry 기본값은 docs/fsm-design.md 결정 이력
-    // (2026-08-11)의 batchSize=5, "300ms x 5회, 모든 단계 통일"을 그대로 씀.
+    // batchSize=1은 stop-and-wait 실기기 비교 테스트용 기본값이다.
+    // ESP32의 OTA_CLIENT_BATCH_SIZE와 반드시 같은 값으로 운용해야 한다.
     //
     // chunkDelayMs: ESP32가 DATA별 즉시 ACK을 보내던 동안에는 반이중 충돌을
     // 줄이기 위해 40ms를 썼다. 이제 수신측이 배치 전체를 RAM에 받은 뒤
@@ -65,7 +65,7 @@ public:
     // 실기기 튜닝이나 구형 수신기 호환이 필요하면 호출부에서 양수로 지정 가능.
     explicit OtaSession(
         ITransport &transport,
-        int batchSize = 5,
+        int batchSize = 1,
         int timeoutMs = 300,
         int maxRetry = 5,
         int chunkDelayMs = 0);
