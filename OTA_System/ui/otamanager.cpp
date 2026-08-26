@@ -460,17 +460,11 @@ void OtaManager::onStartClicked()
         Cc1101Transport *cc1101 = fhssTransport();
         if (!prepareFixedOta(cc1101, tr("비호핑 OTA 시작")))
             return;
-        // CC1101은 반이중이고 현재 ESP32 fixed OTA 경로는 DATA 하나를 받은 뒤
-        // ACK 송신을 끝내고 RX로 복귀해야 다음 DATA를 받을 수 있다. 여기서
-        // batch=5/delay=40ms로 여러 DATA를 밀어 넣으면 ACK TX 중인 ESP32와
-        // 다음 DATA가 충돌한다. 2026-08-25 성공 로그에서는 seq%5==3의
-        // 90.2%가 재전송됐고 전체 전송이 46분까지 늘었다.
-        //
-        // fixed OTA는 한 번에 DATA 하나만 outstanding으로 두고 ACK을 받은 뒤
-        // 다음 청크를 보내는 stop-and-wait로 맞춘다. ACK이 pacing 역할을
-        // 하므로 별도의 chunk delay는 필요 없다. FHSS 경로의 batch=5 설정은
-        // 위 분기에 그대로 유지한다.
-        m_session = std::make_unique<OtaSession>(*m_transport, /*batchSize=*/1,
+        // ESP32는 DATA 5개를 RAM에 모으는 동안 RX를 유지하고, batch를 Flash에
+        // 한 번 commit한 뒤 기존 개별 ACK 5개를 보낸다. 따라서 CC1101의
+        // 반이중 ACK TX와 다음 DATA가 충돌하지 않으면서 RF/Flash batch를
+        // 모두 5로 유지할 수 있다. ACK packet 형식은 변경하지 않는다.
+        m_session = std::make_unique<OtaSession>(*m_transport, /*batchSize=*/5,
                                                   /*timeoutMs=*/600, /*maxRetry=*/20,
                                                   /*chunkDelayMs=*/0);
     }

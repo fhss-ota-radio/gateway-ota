@@ -20,8 +20,8 @@
 //   ota_smoke_session_send <device_path> <bin_file> [target_device_id_hex] [batchSize] [chunkDelayMs]
 //
 //   target_device_id_hex  생략 시 브로드캐스트(ffffffff)
-//   batchSize             생략 시 1 (fixed OTA 반이중 stop-and-wait)
-//   chunkDelayMs          생략 시 0 (ACK 수신이 다음 DATA pacing 역할)
+//   batchSize             생략 시 5 (ESP32가 batch commit 후 ACK 5개 송신)
+//   chunkDelayMs          생략 시 0 (배치 내부 DATA를 연속 송신)
 
 #include "cc1101transport.h"
 #include "otasession.h"
@@ -67,10 +67,10 @@ void printUsage(const char *argv0)
               << " <device_path> <bin_file> [target_device_id_hex] [batchSize] [chunkDelayMs]"
                  " [timeoutMs] [maxRetry]\n"
               << "  예: " << argv0 << " /dev/cc1101 firmware.bin\n"
-              << "  예(기본 stop-and-wait): " << argv0
-              << " /dev/cc1101 firmware.bin ffffffff 1 0\n"
+              << "  예(기본 5개 배치): " << argv0
+              << " /dev/cc1101 firmware.bin ffffffff 5 0\n"
               << "  예(명시적 timeout/retry): " << argv0
-              << " /dev/cc1101 firmware.bin ffffffff 1 0 600 20\n";
+              << " /dev/cc1101 firmware.bin ffffffff 5 0 600 20\n";
 }
 
 } // namespace
@@ -93,15 +93,12 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    // ESP32 fixed OTA 수신기는 DATA마다 ACK 송신을 마친 뒤 RX로 복귀한다.
-    // 기본값 5/40ms는 ACK TX와 다음 DATA가 충돌해 특정 배치 위치가 반복
-    // 유실됐다. 명시 인자는 성능 실험을 위해 그대로 허용하되, 기본 실행은
-    // 한 패킷의 ACK을 확인한 뒤 다음 패킷을 보내는 안전한 stop-and-wait다.
-    const int batchSize = (argc >= 5) ? std::atoi(argv[4]) : 1;
+    // ESP32 fixed OTA 수신기는 batch DATA를 모두 RAM에 받은 뒤 Flash commit과
+    // 개별 ACK 전송을 수행한다. Gateway도 같은 크기 5를 기본값으로 사용한다.
+    const int batchSize = (argc >= 5) ? std::atoi(argv[4]) : 5;
     const int chunkDelayMs = (argc >= 6) ? std::atoi(argv[5]) : 0;
-    // Qt fixed OTA와 같은 복구 여유를 기본값으로 사용한다. stop-and-wait라
-    // 정상 전송에서는 이 타임아웃을 기다리지 않고 ACK 즉시 다음 DATA로
-    // 진행하므로, 값을 늘려도 정상 처리량은 낮아지지 않는다.
+    // Qt fixed OTA와 같은 복구 여유를 기본값으로 사용한다. 정상 전송에서는
+    // 배치 commit 직후 ACK들이 도착하므로 이 타임아웃까지 기다리지 않는다.
     const int timeoutMs = (argc >= 7) ? std::atoi(argv[6]) : 600;
     const int maxRetry = (argc >= 8) ? std::atoi(argv[7]) : 20;
 
