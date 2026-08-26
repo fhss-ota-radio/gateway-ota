@@ -88,6 +88,28 @@ ReceivedPacket tryReceiveOnce(ITransport &transport)
         result.fwPatch = fields.fw_patch;
         break;
     }
+    case OTA_PKT_BATCH_END: {
+        ota_batch_end_fields_t fields;
+        if (!ota_protocol_decode_batch_end(raw.data(), raw.size(), &fields))
+            return result;
+        result.kind = ReceivedPacketKind::BatchEnd;
+        result.sessionId = fields.session_id;
+        result.batchBaseSequence = fields.base_sequence;
+        result.batchChunkCount = fields.chunk_count;
+        break;
+    }
+    case OTA_PKT_BATCH_ACK: {
+        ota_batch_ack_fields_t fields;
+        if (!ota_protocol_decode_batch_ack(raw.data(), raw.size(), &fields))
+            return result;
+        result.kind = ReceivedPacketKind::BatchAck;
+        result.sessionId = fields.session_id;
+        result.batchBaseSequence = fields.base_sequence;
+        result.batchChunkCount = fields.chunk_count;
+        result.receivedMask = fields.received_mask;
+        result.resultCode = fields.result_code;
+        break;
+    }
     default:
         break; // 알 수 없는 type byte — Unknown 유지, raw는 이미 채워짐
     }

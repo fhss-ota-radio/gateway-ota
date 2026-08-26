@@ -431,7 +431,7 @@ void OtaManager::onStartClicked()
     // 계산에 쓰인 m_fhssActive/session_id 재사용 주석과 같은 맥락).
     if (useHopping) {
         // tests/smoke_fhss_ota_transfer_main.cpp 259~269행과 동일:
-        // SlotAwareTransport로 감싸고, 테스트용 batchSize=1/timeoutMs=300/maxRetry=20/
+        // SlotAwareTransport로 감싸고, batchSize=5/timeoutMs=300/maxRetry=20/
         // chunkDelayMs=0을 씀. maxRetry가 평소(5)보다 4배 큰 이유는 ESP32가
         // 호핑 중 SYNC를 잃으면 재동기화에 최악 3.3초 걸릴 수 있어서
         // (위 kFhssSyncSettleMs 주석과 같은 근거) — 5회(약 1초)로는 그 전에
@@ -449,7 +449,7 @@ void OtaManager::onStartClicked()
         }
         m_slotAwareTransport =
             std::make_unique<SlotAwareTransport>(*cc1101, m_fhssGeneration, m_fhssSlotDurationUs);
-        m_session = std::make_unique<OtaSession>(*m_slotAwareTransport, /*batchSize=*/1,
+        m_session = std::make_unique<OtaSession>(*m_slotAwareTransport, /*batchSize=*/5,
                                                   /*timeoutMs=*/300, /*maxRetry=*/20,
                                                   /*chunkDelayMs=*/0);
     } else {
@@ -460,9 +460,9 @@ void OtaManager::onStartClicked()
         Cc1101Transport *cc1101 = fhssTransport();
         if (!prepareFixedOta(cc1101, tr("비호핑 OTA 시작")))
             return;
-        // stop-and-wait 비교 테스트: DATA 하나를 보낸 뒤 Flash commit/ACK을
-        // 기다린다. ESP32 OTA_CLIENT_BATCH_SIZE도 1로 맞춘 상태여야 한다.
-        m_session = std::make_unique<OtaSession>(*m_transport, /*batchSize=*/1,
+        // DATA 5개를 연속 송신한 뒤 BATCH_END/BATCH_ACK bitmap으로 확인한다.
+        // ESP32 OTA_CLIENT_BATCH_SIZE도 5로 맞춘 상태여야 한다.
+        m_session = std::make_unique<OtaSession>(*m_transport, /*batchSize=*/5,
                                                   /*timeoutMs=*/600, /*maxRetry=*/20,
                                                   /*chunkDelayMs=*/0);
     }

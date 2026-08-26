@@ -67,6 +67,23 @@ std::vector<uint8_t> makeAckOrNack(ota_packet_type_t type, uint32_t sessionId,
     return std::vector<uint8_t>(buf, buf + written);
 }
 
+std::vector<uint8_t> makeBatchAck(uint32_t sessionId, uint32_t baseSequence,
+                                  uint8_t chunkCount, uint8_t receivedMask,
+                                  uint8_t resultCode = OTA_RESULT_OK)
+{
+    ota_batch_ack_fields_t fields{};
+    fields.session_id = sessionId;
+    fields.base_sequence = baseSequence;
+    fields.chunk_count = chunkCount;
+    fields.received_mask = receivedMask;
+    fields.result_code = resultCode;
+    uint8_t buf[OTA_BATCH_ACK_PACKET_SIZE];
+    const size_t written = ota_protocol_encode_batch_ack(
+        buf, sizeof(buf), &fields);
+    assert(written == OTA_BATCH_ACK_PACKET_SIZE);
+    return std::vector<uint8_t>(buf, buf + written);
+}
+
 // 실기기(CC1101) 대신 쓰는 인메모리 ITransport. send()는 그냥 기록만 하고,
 // recv()는 rxQueue에 미리 넣어둔 걸 하나씩 꺼내 돌려줌(비어있으면 빈 벡터 —
 // tryReceiveOnce()가 "아직 도착한 거 없음"으로 해석하는 것과 동일한 규약).
@@ -193,8 +210,7 @@ void nackRetransmitsOnlyThatChunkImmediately()
     std::cout << "[OK] nackRetransmitsOnlyThatChunkImmediately\n";
 }
 
-// ACK/NACK이 아예 안 와도(무선 유실 흉내) 타임아웃이 지나면 같은 슬롯을
-// 재전송하는지 확인 — nowMs를 가짜로 진행시켜서 실제로 기다리지 않고 검증.
+// BATCH_ACK이 유실되면 DATA를 추측 재전송하지 않고 BATCH_END만 재전송하는지 확인.
 void timeoutTriggersResendOfSameChunk()
 {
     const std::string path = writeTempFile("os_timeout.bin", repeat('C', 10)); // 1청크
@@ -207,16 +223,18 @@ void timeoutTriggersResendOfSameChunk()
     transport.rxQueue.push_back(makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_START, OTA_CONTROL_SEQUENCE));
     session.tick(1010); // DATA(seq0) 최초 전송, sentAtMs=1010
     assert(transport.countSentOfType(OTA_PKT_DATA) == 1);
+    assert(transport.countSentOfType(OTA_PKT_BATCH_END) == 1);
 
     session.tick(1060); // 아직 100ms 안 지남 -> 재전송 없음
     assert(transport.countSentOfType(OTA_PKT_DATA) == 1);
 
-    session.tick(1120); // 1120-1010=110ms > 100ms -> 재전송
-    assert(transport.countSentOfType(OTA_PKT_DATA) == 2);
+    session.tick(1120); // timeout -> DATA가 아니라 BATCH_END만 재전송
+    assert(transport.countSentOfType(OTA_PKT_DATA) == 1);
+    assert(transport.countSentOfType(OTA_PKT_BATCH_END) == 2);
     assert(session.state() == OtaSessionState::WaitingBatchAck);
 
     // 이제 응답 -> 완료 진행
-    transport.rxQueue.push_back(makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_DATA, 0));
+    transport.rxQueue.push_back(makeBatchAck(kSessionId, 0, 1, 0x01));
     session.tick(1130);
     assert(session.state() == OtaSessionState::WaitingEndAck);
 
@@ -224,7 +242,7 @@ void timeoutTriggersResendOfSameChunk()
     std::cout << "[OK] timeoutTriggersResendOfSameChunk\n";
 }
 
-// 재전송이 maxRetry를 넘으면 Failed로 가는지 (배치 단계).
+// BATCH_END 재전송이 maxRetry를 넘으면 Failed로 가는지 (배치 단계).
 void batchMaxRetryExceededLeadsToFailed()
 {
     const std::string path = writeTempFile("os_maxretry.bin", repeat('D', 10)); // 1청크
@@ -237,16 +255,48 @@ void batchMaxRetryExceededLeadsToFailed()
     transport.rxQueue.push_back(makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_START, OTA_CONTROL_SEQUENCE));
     session.tick(1010); // DATA 최초 전송(sentAtMs=1010)
 
-    session.tick(1070); // 60ms 지남 -> 재시도 1회째 (retryCount=1, maxRetry=1이라 허용)
+    session.tick(1070); // 60ms 지남 -> BATCH_END 재시도 1회째
     assert(session.state() == OtaSessionState::WaitingBatchAck);
     assert(session.errorMessage().empty());
 
-    session.tick(1140); // 다시 60ms+ 지남 -> 재시도 2회째, maxRetry(1) 초과 -> Failed
+    session.tick(1140); // 다시 timeout -> BATCH_END 재시도 한도 초과
     assert(session.state() == OtaSessionState::Failed);
     assert(!session.errorMessage().empty());
 
     std::remove(path.c_str());
     std::cout << "[OK] batchMaxRetryExceededLeadsToFailed\n";
+}
+
+void bitmapBatchAckRetransmitsOnlyMissingData()
+{
+    const std::string path = writeTempFile("os_bitmap_missing.bin", repeat('M', 48 * 4 + 10));
+    constexpr uint32_t kSessionId = 0xABCD1234u;
+
+    FakeTransport transport;
+    OtaSession session(transport, /*batchSize=*/5, /*timeoutMs=*/300,
+                       /*maxRetry=*/5, /*chunkDelayMs=*/0);
+    assert(session.start(path, 1, kSessionId, 1000));
+    transport.rxQueue.push_back(
+        makeAckOrNack(OTA_PKT_ACK, kSessionId, OTA_PKT_START,
+                      OTA_CONTROL_SEQUENCE));
+    session.tick(1010);
+    assert(transport.countSentOfType(OTA_PKT_DATA) == 5);
+    assert(transport.countSentOfType(OTA_PKT_BATCH_END) == 1);
+
+    // 사용자가 우려한 마지막 offset 4(seq=4) 유실. 앞 4개는 다시 보내지 않는다.
+    transport.rxQueue.push_back(makeBatchAck(kSessionId, 0, 5, 0x0F));
+    session.tick(1020);
+    assert(transport.countSentOfType(OTA_PKT_DATA) == 6);
+    assert(transport.countSentOfType(OTA_PKT_BATCH_END) == 2);
+    assert(session.progress().ackedChunks == 4);
+
+    transport.rxQueue.push_back(makeBatchAck(kSessionId, 0, 5, 0x1F));
+    session.tick(1030);
+    assert(session.state() == OtaSessionState::WaitingEndAck);
+    assert(session.progress().ackedChunks == 5);
+
+    std::remove(path.c_str());
+    std::cout << "[OK] bitmapBatchAckRetransmitsOnlyMissingData\n";
 }
 
 // 핸드셰이크(START) 단계에서도 같은 재시도-초과 -> Failed 규칙이 적용되는지.
@@ -648,6 +698,7 @@ int main()
     nackRetransmitsOnlyThatChunkImmediately();
     timeoutTriggersResendOfSameChunk();
     batchMaxRetryExceededLeadsToFailed();
+    bitmapBatchAckRetransmitsOnlyMissingData();
     handshakeMaxRetryExceededLeadsToFailed();
     endNackGoesDirectlyToFailedWithoutRetry();
     resumeDoesNotCauseSpuriousTimeout();

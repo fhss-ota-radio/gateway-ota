@@ -25,7 +25,7 @@
 // 사용법:
 //   ota_smoke_fhss_ota_transfer <device_path> <bin_file> <session_id_hex>
 //       <target_id_hex> <generation> [channel_count=8] [first_channel=1]
-//       [seed_hex=0] [batchSize=1] [chunkDelayMs=0] [timeoutMs=300] [maxRetry=20]
+//       [seed_hex=0] [batchSize=5] [chunkDelayMs=0] [timeoutMs=300] [maxRetry=20]
 //
 // 예: ota_smoke_fhss_ota_transfer /dev/cc1101 firmware.bin 0x1 A29E60 1 8 1 0x46485353
 
@@ -70,7 +70,7 @@ void printUsage(const char *argv0)
     std::cerr << "사용법: " << argv0
               << " <device_path> <bin_file> <session_id_hex> <target_id_hex> "
                  "<generation> [channel_count=8] [first_channel=1] [seed_hex=0] "
-                 "[batchSize=1] [chunkDelayMs=0] [timeoutMs=300] [maxRetry=20]\n"
+                 "[batchSize=5] [chunkDelayMs=0] [timeoutMs=300] [maxRetry=20]\n"
               << "  예: " << argv0
               << " /dev/cc1101 firmware.bin 0x1 A29E60 1 8 1 0x46485353\n";
 }
@@ -153,7 +153,7 @@ int main(int argc, char *argv[])
         std::cerr << "seed_hex 파싱 실패: " << argv[8] << "\n";
         return 1;
     }
-    const int batchSize = (argc >= 10) ? std::atoi(argv[9]) : 1;
+    const int batchSize = (argc >= 10) ? std::atoi(argv[9]) : 5;
     const int chunkDelayMs = (argc >= 11) ? std::atoi(argv[10]) : 0;
     const int timeoutMs = (argc >= 12) ? std::atoi(argv[11]) : 300;
     // [2026-08-24 정정: 기본값 5 -> 20] ESP32가 전송 중 SYNC를 잃으면

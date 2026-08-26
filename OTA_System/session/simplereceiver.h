@@ -19,6 +19,8 @@ enum class ReceivedPacketKind {
     Nack,
     Discover,
     DiscoverAck,
+    BatchEnd,
+    BatchAck,
 };
 
 // 패킷 하나를 받았을 때 담기는 정보. decode까지 이미 끝낸 상태라
@@ -44,6 +46,9 @@ struct ReceivedPacket
     uint32_t totalChunks = 0;        // Start/End
     uint8_t  payloadLength = 0;      // Data
     uint8_t  resultCode = 0;         // Ack/Nack
+    uint32_t batchBaseSequence = 0;  // BatchEnd/BatchAck
+    uint8_t  batchChunkCount = 0;    // BatchEnd/BatchAck
+    uint8_t  receivedMask = 0;       // BatchAck
     uint32_t deviceId = 0;           // DiscoverAck
     uint8_t  fwMajor = 0;            // DiscoverAck
     uint8_t  fwMinor = 0;            // DiscoverAck

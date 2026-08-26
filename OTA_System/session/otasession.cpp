@@ -52,7 +52,7 @@ const char *otaSessionStateName(OtaSessionState state)
 OtaSession::OtaSession(ITransport &transport, int batchSize, int timeoutMs, int maxRetry,
                         int chunkDelayMs)
     : m_transport(transport)
-    , m_batchSize(std::max(1, batchSize))
+    , m_batchSize(std::clamp(batchSize, 1, static_cast<int>(OTA_BATCH_MAX_CHUNKS)))
     , m_timeoutMs(std::max(1, timeoutMs))
     , m_maxRetry(std::max(0, maxRetry))
     , m_chunkDelayMs(std::max(0, chunkDelayMs))
@@ -197,6 +197,7 @@ void OtaSession::enterHandshaking(int64_t nowMs)
     m_controlRetryCount = 0;
     sendStartPacket();
     m_controlSentAtMs = nowMs;
+    m_batchEndSentAtMs = nowMs;
 }
 
 void OtaSession::tickHandshaking(int64_t nowMs)
@@ -352,7 +353,82 @@ void OtaSession::enterSendingBatch(int64_t nowMs)
     // 반복하다 실패). RXFIFO_OVERFLOW 자체를 marc_state로 직접 확인하지
     // 않고 가설만으로 패치했던 게 원인 — 다음에 이 계열 문제가 다시
     // 나오면 cc1101_diag로 marc_state부터 확인하고 나서 손댈 것.
+    m_batchEndRetryCount = 0;
+    if (!sendBatchEndPacket(currentMs)) {
+        fail("OTA_BATCH_END 전송 실패");
+        return;
+    }
     setState(OtaSessionState::WaitingBatchAck);
+}
+
+bool OtaSession::sendBatchEndPacket(int64_t nowMs)
+{
+    if (m_batch.empty())
+        return false;
+
+    ota_batch_end_fields_t fields{};
+    fields.session_id = m_sessionId;
+    fields.base_sequence = m_batch.front().sequence;
+    fields.chunk_count = static_cast<uint8_t>(m_batch.size());
+
+    uint8_t packet[OTA_BATCH_END_PACKET_SIZE];
+    const size_t written = ota_protocol_encode_batch_end(
+        packet, sizeof(packet), &fields);
+    if (written == 0)
+        return false;
+
+    if (!sendWithRetry(std::vector<uint8_t>(packet, packet + written),
+                       "BATCH_END base=" + std::to_string(fields.base_sequence)))
+        return false;
+
+    m_batchEndSentAtMs = nowMs;
+    log("BATCH_END 전송 (base=" + std::to_string(fields.base_sequence)
+        + ", count=" + std::to_string(fields.chunk_count) + ")");
+    return true;
+}
+
+bool OtaSession::applyBatchAck(const ReceivedPacket &packet, int64_t nowMs)
+{
+    if (packet.kind != ReceivedPacketKind::BatchAck || m_batch.empty())
+        return true;
+    if (packet.sessionId != m_sessionId ||
+        packet.batchBaseSequence != m_batch.front().sequence ||
+        packet.batchChunkCount != m_batch.size()) {
+        return true; // 다른 세션/이전 배치의 stale 응답
+    }
+    if (packet.resultCode != static_cast<uint8_t>(OTA_RESULT_OK)) {
+        fail("BATCH_ACK 실패 (result_code="
+             + std::to_string(static_cast<int>(packet.resultCode)) + ")");
+        return false;
+    }
+
+    const uint8_t required = ota_protocol_batch_required_mask(
+        static_cast<uint8_t>(m_batch.size()));
+    const uint8_t received = static_cast<uint8_t>(packet.receivedMask & required);
+    for (size_t i = 0; i < m_batch.size(); ++i) {
+        if ((received & static_cast<uint8_t>(1u << i)) != 0u && !m_batch[i].acked) {
+            m_batch[i].acked = true;
+            ++m_totalAcked;
+        }
+    }
+
+    log("BATCH_ACK 수신 (base=" + std::to_string(packet.batchBaseSequence)
+        + ", mask=0x" + toHex(received) + ")");
+    if (received == required)
+        return true;
+
+    m_batchEndRetryCount = 0;
+    for (size_t i = 0; i < m_batch.size(); ++i) {
+        if ((received & static_cast<uint8_t>(1u << i)) != 0u)
+            continue;
+        if (!retransmitSlot(m_batch[i], nowMs, "BATCH_ACK missing mask"))
+            return false;
+    }
+    if (!sendBatchEndPacket(nowMs)) {
+        fail("누락 DATA 재전송 후 OTA_BATCH_END 전송 실패");
+        return false;
+    }
+    return true;
 }
 
 bool OtaSession::retransmitSlot(BatchSlot &slot, int64_t nowMs, const char *reason)
@@ -400,6 +476,8 @@ bool OtaSession::pollAndApplyAckOrNack(int64_t nowMs, bool *hadPacket)
     // 이 값으로 "더 읽을 게 남았는지" 판단한다.
     if (hadPacket)
         *hadPacket = !(packet.kind == ReceivedPacketKind::Unknown && packet.raw.empty());
+    if (packet.kind == ReceivedPacketKind::BatchAck)
+        return applyBatchAck(packet, nowMs);
     // [버그 수정 2026-08-20, ESP32 담당자 리포트 클레임 1] acknowledged_type이
     // OTA_PKT_DATA인 응답만 배치 슬롯에 매칭한다. 예전엔 이 필드를 확인 안
     // 하고 sequence만 봤는데, sequence 하나만으로는 "이게 START/END에 대한
@@ -428,6 +506,10 @@ bool OtaSession::pollAndApplyAckOrNack(int64_t nowMs, bool *hadPacket)
                 // (fsm-design.md §6 "슬롯별 독립 타이머 + NACK 이중 방어")
                 if (!retransmitSlot(slot, nowMs, "NACK"))
                     return false; // fail() 처리됨
+                if (!sendBatchEndPacket(nowMs)) {
+                    fail("NACK 재전송 후 OTA_BATCH_END 전송 실패");
+                    return false;
+                }
             }
             break;
         }
@@ -509,30 +591,22 @@ void OtaSession::tickWaitingBatchAck(int64_t nowMs)
     if (!drainAckOrNackQueue(nowMs))
         return; // fail() 처리됨
 
-    // 2. 타임아웃 확인 — 아직 acked=false인 슬롯만.
-    //
-    // [수정 2026-08-19] 한 틱에 "하나만" 재전송한다 (원래는 타임아웃된 슬롯
-    // 전부를 이 루프에서 연달아 쐈음).
-    //
-    // 실기기 검증에서 드러난 문제: 배치 5개가 거의 동시에 타임아웃되면 이
-    // 루프가 한 틱 안에서 5개를 쉬는 시간 없이 연속 송신했다. CC1101은
-    // 반이중(half-duplex, 송신 중에는 수신 불가)이라, 그동안 수신측이 보낸
-    // ACK가 전부 송신측 귀에 안 들어온다. 그러면 다음 타임아웃에 또 5개를
-    // 몰아 쏘고 또 못 듣고… 이 악순환이 maxRetry회 반복되면 "재전송 한도
-    // 초과"로 죽는다. 실제로 수신측 로그에는 해당 seq를 정상 수신하고 ACK를
-    // 보낸 기록이 남아 있는데도 송신측만 못 받고 실패했다.
-    //
-    // 하나씩 보내면 send() 이후 다음 틱까지(호출부 기준 10ms) 반드시 수신
-    // 기회가 생기고, 아래 chunkDelayMs 간격까지 더해져 상대 ACK가 돌아올
-    // 시간이 확보된다.
-    for (auto &slot : m_batch) {
-        if (slot.acked)
-            continue;
-        if (nowMs - slot.sentAtMs <= m_timeoutMs)
-            continue;
-        if (!retransmitSlot(slot, nowMs, "timeout"))
-            return; // fail() 처리됨
-        break;      // 한 틱에 하나만 — 나머지는 다음 틱에서 다시 판정
+    // BATCH_ACK 자체 또는 BATCH_END가 유실된 경우 DATA를 추측 재전송하지
+    // 않고 BATCH_END만 다시 보낸다. 수신측이 보존한 received_mask가 정확한
+    // 누락 DATA를 알려주며, 이미 commit된 배치에도 멱등하게 full mask를 준다.
+    if (nowMs - m_batchEndSentAtMs > m_timeoutMs) {
+        if (++m_batchEndRetryCount > m_maxRetry) {
+            fail("BATCH_ACK 응답 없음 — " + std::to_string(m_maxRetry)
+                 + "회 BATCH_END 재시도 초과");
+            return;
+        }
+        log("BATCH_ACK 타임아웃 — BATCH_END만 재전송 ("
+            + std::to_string(m_batchEndRetryCount) + "/"
+            + std::to_string(m_maxRetry) + ")");
+        if (!sendBatchEndPacket(nowMs)) {
+            fail("OTA_BATCH_END 재전송 실패");
+            return;
+        }
     }
 
     // 3. 배치 전체 완료 확인 — 슬롯 하나가 끝났다고 다음 seq를 채워 넣지 않고,

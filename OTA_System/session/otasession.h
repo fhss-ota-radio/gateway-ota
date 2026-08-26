@@ -9,6 +9,7 @@
 #include "binsplitter.h" // OtaChunk
 
 class ITransport;
+struct ReceivedPacket;
 
 // docs/fsm-design.md의 송신측 FSM("OtaSession") 구현체.
 //
@@ -56,7 +57,7 @@ struct OtaSessionProgress
 class OtaSession
 {
 public:
-    // batchSize=1은 stop-and-wait 실기기 비교 테스트용 기본값이다.
+    // 고정 배치 5개를 연속 전송하고 BATCH_END/BATCH_ACK bitmap으로 확인한다.
     // ESP32의 OTA_CLIENT_BATCH_SIZE와 반드시 같은 값으로 운용해야 한다.
     //
     // chunkDelayMs: ESP32가 DATA별 즉시 ACK을 보내던 동안에는 반이중 충돌을
@@ -65,7 +66,7 @@ public:
     // 실기기 튜닝이나 구형 수신기 호환이 필요하면 호출부에서 양수로 지정 가능.
     explicit OtaSession(
         ITransport &transport,
-        int batchSize = 1,
+        int batchSize = 5,
         int timeoutMs = 300,
         int maxRetry = 5,
         int chunkDelayMs = 0);
@@ -149,6 +150,8 @@ private:
 
     int64_t m_controlSentAtMs = 0;    // HANDSHAKING/WAITING_END_ACK 공용 (START/END 재전송 타이머)
     int m_controlRetryCount = 0;
+    int64_t m_batchEndSentAtMs = 0;
+    int m_batchEndRetryCount = 0;
 
     uint32_t m_totalAcked = 0;        // progress() 표시용 누적 카운터
     uint32_t m_currentBatchNumber = 0; // progress() 표시용 (1-based)
@@ -174,6 +177,8 @@ private:
 
     void enterSendingBatch(int64_t nowMs); // 배치를 채우고 즉시 전부 전송 -> WaitingBatchAck
     void tickWaitingBatchAck(int64_t nowMs);
+    bool sendBatchEndPacket(int64_t nowMs);
+    bool applyBatchAck(const ReceivedPacket &packet, int64_t nowMs);
     // 슬롯 하나를 재전송. retryCount가 maxRetry를 넘으면 fail() 처리하고 false 반환.
     // reason: 로그에만 쓰는 문자열("NACK"/"timeout") — 왜 재전송이 트리거됐는지
     // 구분하기 위함(2026-08-20 로그 추가).
